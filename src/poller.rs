@@ -6,7 +6,7 @@ use tokio::time::sleep;
 
 use crate::backend::DynBackend;
 use crate::cache::{Cache, now_unix};
-use crate::gcp::grants::is_terminal;
+use crate::gcp::grants::GrantState;
 
 /// Default cadence for real GCP. `--demo` overrides this with a smaller value.
 pub const DEFAULT_POLL_INTERVAL: StdDuration = StdDuration::from_secs(3);
@@ -52,20 +52,19 @@ impl Poller {
         self,
         grant_name: String,
         requested_duration_secs: i64,
-        initial_state: String,
+        initial_state: GrantState,
         mode: PollMode,
     ) {
         let mut last_state = initial_state;
-        let already_active = last_state.contains("Active");
+        let already_active = last_state.is_active();
 
         loop {
             match self.backend.get_grant_state(&grant_name).await {
                 Ok(state) => {
                     let now = now_unix();
-                    let became_active = state.contains("Active")
-                        && !already_active
-                        && !last_state.contains("Active");
-                    let terminal = is_terminal(&state);
+                    let became_active =
+                        state.is_active() && !already_active && !last_state.is_active();
+                    let terminal = state.is_terminal();
 
                     let (activated_at, expires_at) = if became_active {
                         let exp = now + requested_duration_secs;
@@ -85,9 +84,8 @@ impl Poller {
                         );
                     }
 
-                    let stop = terminal
-                        || state.contains("Active")
-                        || matches!(mode, PollMode::ConfirmOnce);
+                    let stop =
+                        terminal || state.is_active() || matches!(mode, PollMode::ConfirmOnce);
                     let _ = self
                         .tx
                         .send(GrantUpdate {

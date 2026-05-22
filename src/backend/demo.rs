@@ -8,6 +8,7 @@ use crate::backend::{Backend, ScopeTarget};
 use crate::cache::{EntitlementRow, FolderRow, OrganizationRow, ProjectRow, now_unix};
 use crate::gcp::Scope;
 use crate::gcp::entitlements::parent;
+use crate::gcp::grants::GrantState;
 
 /// Seeded data + in-memory grant state machine. Lets the binary be tried
 /// without GCP credentials -- `--demo` swaps this in for [`GcpBackend`].
@@ -28,7 +29,7 @@ struct DemoGrants {
 }
 
 struct DemoGrant {
-    state: String,
+    state: GrantState,
     poll_count: u32,
     /// `true` when the source entitlement has no approvers. The demo state
     /// machine activates these on the first poll and manual ones take longer.
@@ -281,7 +282,7 @@ impl Backend for DemoBackend {
         g.by_name.insert(
             name.clone(),
             DemoGrant {
-                state: "Requested".into(),
+                state: GrantState::Requested,
                 poll_count: 0,
                 auto,
             },
@@ -289,18 +290,18 @@ impl Backend for DemoBackend {
         Ok(name)
     }
 
-    async fn get_grant_state(&self, grant_name: &str) -> Result<String> {
+    async fn get_grant_state(&self, grant_name: &str) -> Result<GrantState> {
         let mut g = self.grants.lock().unwrap();
         // Unknown grants (e.g. persisted from a previous demo session) resolve
         // as Ended so the poller stops cleanly without growing a backlog.
         let Some(grant) = g.by_name.get_mut(grant_name) else {
-            return Ok("Ended".into());
+            return Ok(GrantState::Ended);
         };
         grant.poll_count += 1;
         grant.state = if grant.auto || grant.poll_count >= 2 {
-            "Active".into()
+            GrantState::Active
         } else {
-            "ApprovalAwaited".into()
+            GrantState::ApprovalAwaited
         };
         Ok(grant.state.clone())
     }

@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::cache::{EntitlementRow, GrantRow, now_unix};
-use crate::gcp::grants::{MIN_DURATION_SECS, parse_duration};
+use crate::gcp::grants::{GrantState, MIN_DURATION_SECS, parse_duration};
 use crate::poller::{GrantUpdate, PollMode, Poller};
 
 use super::Term;
@@ -123,7 +123,7 @@ pub async fn run(
                             scope_id: ent.scope_id.clone(),
                             scope_display_name: ent.scope_display_name.clone(),
                             short_id,
-                            state: "Requested".into(),
+                            state: GrantState::Requested,
                             requested_duration_secs: duration_secs,
                             justification: justification.clone(),
                             created_at: now,

@@ -15,7 +15,7 @@ use crate::backend::DynBackend;
 use crate::cache::{Cache, EntitlementRow, GrantRow, meta_keys, now_unix};
 use crate::fuzzy;
 use crate::gcp::Scope;
-use crate::gcp::grants::is_terminal;
+use crate::gcp::grants::GrantState;
 use crate::poller::GrantUpdate;
 use crate::refresh::{self, RefreshEvent, RefreshOptions};
 
@@ -427,7 +427,7 @@ impl BrowseScreen {
     fn live_grants(&self) -> impl Iterator<Item = &GrantRow> {
         self.tracked_grants
             .iter()
-            .filter(|g| !is_terminal(&g.state))
+            .filter(|g| !g.state.is_terminal())
     }
 
     fn render_strip(&self, frame: &mut Frame, area: Rect) {
@@ -787,8 +787,8 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-fn strip_badge(state: &str) -> (&'static str, Style) {
-    if state.contains("Active") {
+fn strip_badge(state: &GrantState) -> (&'static str, Style) {
+    if state.is_active() {
         (
             "A",
             Style::default()
@@ -806,7 +806,7 @@ fn strip_badge(state: &str) -> (&'static str, Style) {
 }
 
 fn strip_timing(g: &GrantRow, now: i64) -> String {
-    if g.state.contains("Active") {
+    if g.state.is_active() {
         match g.expires_at {
             Some(exp) if exp > now => format!("exp: {}", format_age(exp - now)),
             Some(_) => "expired".into(),

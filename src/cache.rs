@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::gcp::Scope;
+use crate::gcp::grants::GrantState;
 
 /// Schema version for the cache-only tables (projects, folders, organizations,
 /// entitlements). Bumping this drops and recreates those tables.
@@ -174,7 +175,7 @@ pub struct GrantRow {
     /// Joined from projects/folders/organizations at read time. Not persisted.
     pub scope_display_name: Option<String>,
     pub short_id: String,
-    pub state: String,
+    pub state: GrantState,
     pub requested_duration_secs: i64,
     pub justification: Option<String>,
     pub created_at: i64,
@@ -419,7 +420,7 @@ impl Cache {
     pub fn update_grant_state(
         &self,
         name: &str,
-        state: &str,
+        state: &GrantState,
         activated_at: Option<i64>,
         expires_at: Option<i64>,
         last_polled_at: i64,
@@ -452,8 +453,7 @@ impl Cache {
              LEFT JOIN projects      p ON g.scope_type='project'      AND g.scope_id = p.project_id
              LEFT JOIN folders       f ON g.scope_type='folder'       AND g.scope_id = f.folder_id
              LEFT JOIN organizations o ON g.scope_type='organization' AND g.scope_id = o.org_id
-             WHERE g.state NOT IN ('Denied','Expired','Revoked','Ended','Withdrawn','ActivationFailed',
-                                   'DENIED','EXPIRED','REVOKED','ENDED','WITHDRAWN','ACTIVATION_FAILED')
+             WHERE g.state NOT IN ('Denied','Expired','Revoked','Ended','Withdrawn','ActivationFailed')
                 OR COALESCE(g.expires_at, g.last_polled_at, g.created_at) >= ?1
              ORDER BY g.created_at DESC",
         )?;
@@ -682,7 +682,7 @@ mod tests {
             scope_id: "p".into(),
             scope_display_name: None,
             short_id: "g1".into(),
-            state: "Requested".into(),
+            state: GrantState::Requested,
             requested_duration_secs: 3600,
             justification: Some("on-call paging investigation".into()),
             created_at: 1700000000,
@@ -695,7 +695,7 @@ mod tests {
 
         let tracked = cache.list_tracked_grants(1700000010).unwrap();
         assert_eq!(tracked.len(), 1);
-        assert_eq!(tracked[0].state, "Requested");
+        assert_eq!(tracked[0].state, GrantState::Requested);
         assert_eq!(tracked[0].scope_type, Scope::Project);
         assert_eq!(
             tracked[0].justification.as_deref(),
@@ -705,20 +705,20 @@ mod tests {
         cache
             .update_grant_state(
                 &row.name,
-                "Active",
+                &GrantState::Active,
                 Some(1700000050),
                 Some(1700003650),
                 1700000050,
             )
             .unwrap();
         let tracked = cache.list_tracked_grants(1700000060).unwrap();
-        assert_eq!(tracked[0].state, "Active");
+        assert_eq!(tracked[0].state, GrantState::Active);
         assert_eq!(tracked[0].activated_at, Some(1700000050));
         assert_eq!(tracked[0].expires_at, Some(1700003650));
 
         // A second patch without timestamps should leave them intact.
         cache
-            .update_grant_state(&row.name, "Active", None, None, 1700000100)
+            .update_grant_state(&row.name, &GrantState::Active, None, None, 1700000100)
             .unwrap();
         let tracked = cache.list_tracked_grants(1700000110).unwrap();
         assert_eq!(tracked[0].activated_at, Some(1700000050));
@@ -730,9 +730,9 @@ mod tests {
     fn list_tracked_drops_old_terminal_rows() {
         let cache = temp_cache();
         for (id, state, expires) in [
-            ("g1", "Active", Some(2_000_000_000_i64)),
-            ("g2", "Ended", Some(1_700_000_000_i64)),
-            ("g3", "Ended", Some(1_700_003_500_i64)),
+            ("g1", GrantState::Active, Some(2_000_000_000_i64)),
+            ("g2", GrantState::Ended, Some(1_700_000_000_i64)),
+            ("g3", GrantState::Ended, Some(1_700_003_500_i64)),
         ] {
             let row = GrantRow {
                 name: format!("ent/grants/{id}"),
@@ -742,7 +742,7 @@ mod tests {
                 scope_id: "proj".into(),
                 scope_display_name: None,
                 short_id: id.into(),
-                state: state.into(),
+                state,
                 requested_duration_secs: 3600,
                 justification: None,
                 created_at: 1_700_000_000,
@@ -787,7 +787,7 @@ mod tests {
                     scope_id: "p".into(),
                     scope_display_name: None,
                     short_id: "g1".into(),
-                    state: "Active".into(),
+                    state: GrantState::Active,
                     requested_duration_secs: 3600,
                     justification: None,
                     created_at: 1_700_000_000,

@@ -18,7 +18,6 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::backend::DynBackend;
 use crate::cache::{Cache, now_unix};
-use crate::gcp::grants::is_terminal;
 use crate::poller::{PollMode, Poller};
 use crate::refresh::RefreshOptions;
 
@@ -101,10 +100,10 @@ async fn spawn_initial_pollers(poller: &Poller) {
         cache.list_tracked_grants(now).unwrap_or_default()
     };
     for row in rows {
-        if is_terminal(&row.state) {
+        if row.state.is_terminal() {
             continue;
         }
-        let mode = if row.state.contains("Active") {
+        let mode = if row.state.is_active() {
             PollMode::ConfirmOnce
         } else {
             PollMode::Track

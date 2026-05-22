@@ -8,6 +8,7 @@ use async_trait::async_trait;
 
 use crate::cache::{EntitlementRow, FolderRow, OrganizationRow, ProjectRow};
 use crate::gcp::Scope;
+use crate::gcp::grants::GrantState;
 
 pub type DynBackend = Arc<dyn Backend>;
 
@@ -44,5 +45,5 @@ pub trait Backend: Send + Sync {
     ) -> Result<String>;
 
     /// Single grant state read
-    async fn get_grant_state(&self, grant_name: &str) -> Result<String>;
+    async fn get_grant_state(&self, grant_name: &str) -> Result<GrantState>;
 }
