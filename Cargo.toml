@@ -1,0 +1,33 @@
+[package]
+name = "gpam"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+google-cloud-privilegedaccessmanager-v1 = "1"
+google-cloud-resourcemanager-v3 = "1"
+google-cloud-auth = "1"
+google-cloud-gax = "1"
+google-cloud-wkt = "1"
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process"] }
+futures = "0.3"
+async-trait = "0.1"
+
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+rusqlite = { version = "0.32", features = ["bundled"] }
+nucleo-matcher = "0.3"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+directories = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
