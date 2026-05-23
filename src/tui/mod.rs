@@ -102,6 +102,10 @@ async fn spawn_initial_pollers(poller: &Poller) {
     let now = now_unix();
     let rows = {
         let cache = poller.cache.lock().await;
+        // Locally expire any Active grant whose expires_at has passed, so we
+        // don't waste a poll (and surface a confusing error) on a grant that
+        // has already ended.
+        let _ = cache.expire_stale_active_grants(now);
         cache.list_tracked_grants(now).unwrap_or_default()
     };
     for row in rows {

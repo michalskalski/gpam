@@ -413,6 +413,19 @@ impl Cache {
         Ok(())
     }
 
+    /// Locally mark any Active grant whose `expires_at` has passed as Expired.
+    /// Returns the number of rows updated. Avoids a server round-trip on launch
+    /// for grants whose expiry is derivable from cached data.
+    pub fn expire_stale_active_grants(&self, now: i64) -> Result<usize> {
+        let n = self.conn.execute(
+            "UPDATE grants
+             SET state = ?1, last_polled_at = ?2
+             WHERE state = ?3 AND expires_at IS NOT NULL AND expires_at < ?2",
+            params![GrantState::Expired, now, GrantState::Active],
+        )?;
+        Ok(n)
+    }
+
     /// Patch the dynamic fields of a tracked grant after a poll.
     /// `activated_at` and `expires_at` are only written when their argument is
     /// `Some`, that way the first observation of `Active` can stamp them and
@@ -724,6 +737,54 @@ mod tests {
         assert_eq!(tracked[0].activated_at, Some(1700000050));
         assert_eq!(tracked[0].expires_at, Some(1700003650));
         assert_eq!(tracked[0].last_polled_at, Some(1700000100));
+    }
+
+    #[test]
+    fn expire_stale_active_grants_marks_past_expires_at() {
+        let cache = temp_cache();
+        let mk = |id: &str, state: GrantState, expires: Option<i64>| GrantRow {
+            name: format!("ent/grants/{id}"),
+            entitlement_name: "ent".into(),
+            entitlement_short_name: "ent".into(),
+            scope_type: Scope::Project,
+            scope_id: "p".into(),
+            scope_display_name: None,
+            short_id: id.into(),
+            state,
+            requested_duration_secs: 3600,
+            justification: None,
+            created_at: 1_700_000_000,
+            activated_at: None,
+            expires_at: expires,
+            last_polled_at: None,
+            raw_json: None,
+        };
+        // a: active and expired; b: active but still valid; c: active but no expires;
+        // d: already terminal; should be left alone.
+        cache
+            .upsert_grant(&mk("a", GrantState::Active, Some(1_700_000_500)))
+            .unwrap();
+        cache
+            .upsert_grant(&mk("b", GrantState::Active, Some(1_700_010_000)))
+            .unwrap();
+        cache
+            .upsert_grant(&mk("c", GrantState::Active, None))
+            .unwrap();
+        cache
+            .upsert_grant(&mk("d", GrantState::Ended, Some(1_700_000_400)))
+            .unwrap();
+
+        let now = 1_700_001_000;
+        let n = cache.expire_stale_active_grants(now).unwrap();
+        assert_eq!(n, 1);
+
+        let tracked = cache.list_tracked_grants(now).unwrap();
+        let by_id: std::collections::HashMap<_, _> =
+            tracked.iter().map(|g| (g.short_id.as_str(), g)).collect();
+        assert_eq!(by_id["a"].state, GrantState::Expired);
+        assert_eq!(by_id["a"].last_polled_at, Some(now));
+        assert_eq!(by_id["b"].state, GrantState::Active);
+        assert_eq!(by_id["c"].state, GrantState::Active);
     }
 
     #[test]
