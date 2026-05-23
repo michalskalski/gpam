@@ -27,13 +27,10 @@ Options:
 
 ## Access model
 
-1. Eligibility (PAM-side): to see and request an entitlement, you must be listed as a requester on it (directly or via a group).
+1. The Cloud Resource Manager API (`cloudresourcemanager.googleapis.com`) must be enabled in your ADC quota project, which is what backs the project/folder/org enumeration. Set it with `gcloud auth application-default set-quota-project <PROJECT>`.
 2. Resource visibility (IAM-side): gpam enumerates the projects, folders, and organizations you can see and searches each for entitlements. That enumeration uses `resourcemanager.projects.get`, `resourcemanager.folders.get`, and `resourcemanager.organizations.get`. The standard way to grant these at the right scope is the Browser role (`roles/browser`). You can skip a scope tier with `--no-projects`, `--no-folders`, or `--no-orgs` if you don't have visibility there. Polling grant state uses `privilegedaccessmanager.grants.get`, which the grant's creator normally has on their own grants.
+3. Eligibility (PAM-side): to see and request an entitlement, you must be listed as a requester on it (directly or via a group).
 
 ## Cache
 
-Per-account SQLite at `~/Library/Caches/gpam/<account>.db` (macOS) or `~/.cache/gpam/<account>.db` (Linux). Soft freshness 30 m (background refresh), hard 24 h (block on refresh). Wipe with:
-
-```
-rm -f ~/Library/Caches/gpam/<account>.db
-```
+Per-account SQLite at `~/Library/Caches/gpam/<account>.db` (macOS) or `~/.cache/gpam/<account>.db` (Linux). Soft freshness 30 m (background refresh), hard 24 h (block on refresh).
