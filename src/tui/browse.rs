@@ -16,6 +16,7 @@ use crate::cache::{Cache, EntitlementRow, GrantRow, meta_keys, now_unix};
 use crate::fuzzy;
 use crate::gcp::Scope;
 use crate::gcp::grants::GrantState;
+use crate::logs::{LogEntry, SharedLogState};
 use crate::poller::GrantUpdate;
 use crate::refresh::{self, RefreshEvent, RefreshOptions};
 
@@ -44,6 +45,7 @@ pub struct BrowseScreen {
     status: String,
     show_raw: bool,
     show_help: bool,
+    show_logs: bool,
     only_marked: bool,
 
     refresh_rx: mpsc::Receiver<RefreshEvent>,
@@ -51,6 +53,8 @@ pub struct BrowseScreen {
 
     tracked_grants: Vec<GrantRow>,
     grant_rx: mpsc::Receiver<GrantUpdate>,
+
+    log_state: SharedLogState,
 }
 
 impl BrowseScreen {
@@ -60,6 +64,7 @@ impl BrowseScreen {
         backend: DynBackend,
         refresh_options: RefreshOptions,
         grant_rx: mpsc::Receiver<GrantUpdate>,
+        log_state: SharedLogState,
     ) -> Result<Self> {
         let (entitlements, last_refresh, tracked_grants) = {
             let cache = cache.lock().await;
@@ -98,11 +103,13 @@ impl BrowseScreen {
             status: String::new(),
             show_raw: false,
             show_help: false,
+            show_logs: false,
             only_marked: false,
             refresh_rx,
             refresh_tx,
             tracked_grants,
             grant_rx,
+            log_state,
         })
     }
 
@@ -178,7 +185,7 @@ impl BrowseScreen {
             Event::Key(k) if k.kind == KeyEventKind::Press => k,
             _ => return None,
         };
-        if self.show_help {
+        if self.show_help || self.show_logs {
             let ctrl = key
                 .modifiers
                 .contains(crossterm::event::KeyModifiers::CONTROL);
@@ -186,6 +193,7 @@ impl BrowseScreen {
                 return Some(None);
             }
             self.show_help = false;
+            self.show_logs = false;
             return None;
         }
         let action = dispatch(self.focus, key)?;
@@ -284,6 +292,12 @@ impl BrowseScreen {
             }
             Action::Help => {
                 self.show_help = true;
+            }
+            Action::ShowLogs => {
+                self.show_logs = true;
+                if let Ok(mut state) = self.log_state.lock() {
+                    state.clear_unread();
+                }
             }
             Action::ToggleRaw => {
                 self.show_raw = !self.show_raw;
@@ -408,6 +422,9 @@ impl BrowseScreen {
 
         if self.show_help {
             render_help(frame, area);
+        }
+        if self.show_logs {
+            self.render_logs(frame, area);
         }
     }
 
@@ -621,17 +638,43 @@ impl BrowseScreen {
             self.entitlements.len(),
             self.status,
         );
-        let keys = "? help";
+        let unread = self
+            .log_state
+            .lock()
+            .map(|s| s.unread)
+            .unwrap_or(0);
+        let warn = if unread > 0 {
+            format!("[{unread} warn] ")
+        } else {
+            String::new()
+        };
+        let keys = "L logs ? help";
+        let dim = Style::default().add_modifier(Modifier::DIM);
+        let warn_style = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        let right_len = warn.len() + keys.len() + 1;
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(keys.len() as u16 + 1),
-            ])
+            .constraints([Constraint::Min(0), Constraint::Length(right_len as u16)])
             .split(area);
-        let dim = Style::default().add_modifier(Modifier::DIM);
         frame.render_widget(Paragraph::new(Span::styled(left, dim)), chunks[0]);
-        frame.render_widget(Paragraph::new(Span::styled(keys, dim)), chunks[1]);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(warn, warn_style),
+                Span::styled(keys, dim),
+            ])),
+            chunks[1],
+        );
+    }
+
+    fn render_logs(&self, frame: &mut Frame, area: Rect) {
+        let snapshot = self
+            .log_state
+            .lock()
+            .map(|s| (s.last.clone(), s.log_path.display().to_string()))
+            .unwrap_or((None, String::new()));
+        render_logs_popup(frame, area, snapshot.0.as_ref(), &snapshot.1);
     }
 }
 
@@ -651,6 +694,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         ("m", "show marked only"),
         ("J", "toggle raw JSON"),
         ("R", "refresh"),
+        ("L", "show warn/error log"),
         ("?", "this help"),
         ("q / ^c", "quit"),
     ];
@@ -729,6 +773,79 @@ fn render_help(frame: &mut Frame, area: Rect) {
     };
     render_col(frame, body[0], list_keys);
     render_col(frame, body[1], search_keys);
+}
+
+fn render_logs_popup(frame: &mut Frame, area: Rect, last: Option<&LogEntry>, log_path: &str) {
+    let w = area.width.saturating_sub(4).min(80).max(40);
+    let h = area.height.saturating_sub(2).min(16).max(8);
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    let rect = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" logs - press any key to close ")
+        .border_style(Style::default().fg(Color::Yellow));
+
+    frame.render_widget(ratatui::widgets::Clear, rect);
+    frame.render_widget(block.clone(), rect);
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .horizontal_margin(2)
+        .vertical_margin(1)
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .split(rect);
+
+    let dim = Style::default().add_modifier(Modifier::DIM);
+    let body: Vec<Line> = match last {
+        None => vec![
+            Line::from(Span::styled(
+                "no warnings or errors recorded yet",
+                dim,
+            )),
+        ],
+        Some(entry) => {
+            let level_style = match entry.level {
+                tracing::Level::ERROR => Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+                _ => Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            };
+            let age = entry
+                .at
+                .elapsed()
+                .map(|d| format_age(d.as_secs() as i64))
+                .unwrap_or_else(|_| "0s".into());
+            vec![
+                Line::from(vec![
+                    Span::styled(format!("{} ", entry.level), level_style),
+                    Span::styled(format!("({age} ago)"), dim),
+                ]),
+                Line::from(Span::raw(entry.message.clone())),
+            ]
+        }
+    };
+    frame.render_widget(
+        Paragraph::new(body).wrap(Wrap { trim: false }),
+        inner[0],
+    );
+
+    let footer = vec![
+        Line::from(Span::styled("full log:", dim)),
+        Line::from(Span::raw(log_path.to_string())),
+    ];
+    frame.render_widget(
+        Paragraph::new(footer).wrap(Wrap { trim: false }),
+        inner[1],
+    );
 }
 
 fn upsert_in_place(rows: &mut Vec<EntitlementRow>, row: EntitlementRow) {

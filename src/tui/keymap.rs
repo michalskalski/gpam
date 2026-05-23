@@ -25,6 +25,7 @@ pub enum Action {
     SearchCursor(SearchMove),
     SearchDeleteWordBack,
     Help,
+    ShowLogs,
     ToggleRaw,
     CycleScopeFilter,
     ToggleMarkedView,
@@ -71,6 +72,7 @@ fn list_action(key: KeyEvent, ctrl: bool) -> Option<Action> {
         Char('/') => Action::FocusSearch,
         Esc => Action::ClearSelection,
         Char('?') => Action::Help,
+        Char('L') => Action::ShowLogs,
         Char('J') => Action::ToggleRaw,
         Char('f') if !ctrl => Action::CycleScopeFilter,
         Char('m') if !ctrl => Action::ToggleMarkedView,
@@ -219,6 +221,18 @@ mod tests {
         assert!(matches!(
             dispatch(Focus::Search, key(KeyCode::Char('m'))),
             Some(Action::SearchInsert('m'))
+        ));
+    }
+
+    #[test]
+    fn capital_l_shows_logs_in_list_focus_only() {
+        assert!(matches!(
+            dispatch(Focus::List, key(KeyCode::Char('L'))),
+            Some(Action::ShowLogs)
+        ));
+        assert!(matches!(
+            dispatch(Focus::Search, key(KeyCode::Char('L'))),
+            Some(Action::SearchInsert('L'))
         ));
     }
 

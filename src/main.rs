@@ -3,6 +3,7 @@ mod backend;
 mod cache;
 mod fuzzy;
 mod gcp;
+mod logs;
 mod poller;
 mod refresh;
 mod tui;
@@ -55,13 +56,7 @@ impl Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    let log_state = logs::init()?;
 
     let (account, backend): (String, Arc<dyn Backend>) = if args.demo {
         ("demo".into(), Arc::new(DemoBackend::new()))
@@ -83,6 +78,7 @@ async fn main() -> Result<()> {
         backend,
         args.refresh_options(),
         poll_interval,
+        log_state,
     )
     .await
 }

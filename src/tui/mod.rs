@@ -18,6 +18,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::backend::DynBackend;
 use crate::cache::{Cache, now_unix};
+use crate::logs::SharedLogState;
 use crate::poller::{PollMode, Poller};
 use crate::refresh::RefreshOptions;
 
@@ -29,6 +30,7 @@ pub async fn run(
     backend: DynBackend,
     refresh_options: RefreshOptions,
     poll_interval: Duration,
+    log_state: SharedLogState,
 ) -> Result<()> {
     let mut term = init_terminal()?;
     let result = run_inner(
@@ -38,6 +40,7 @@ pub async fn run(
         backend,
         refresh_options,
         poll_interval,
+        log_state,
     )
     .await;
     // always restore terminal
@@ -52,6 +55,7 @@ async fn run_inner(
     backend: DynBackend,
     refresh_options: RefreshOptions,
     poll_interval: Duration,
+    log_state: SharedLogState,
 ) -> Result<()> {
     // Channel for grant-state updates from background pollers to the browse
     // strip. Buffer is generous because pollers send aggressively and the
@@ -74,6 +78,7 @@ async fn run_inner(
         backend.clone(),
         refresh_options,
         grant_rx,
+        log_state,
     )
     .await?;
 
