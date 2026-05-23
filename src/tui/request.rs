@@ -140,13 +140,7 @@ pub async fn run(
                         // Surface the new row to the strip immediately, then
                         // spawn a poller; the first poll observation will
                         // overwrite this provisional state via the same channel.
-                        let _ = poller
-                            .tx
-                            .send(GrantUpdate {
-                                name: name.clone(),
-                                error: None,
-                            })
-                            .await;
+                        let _ = poller.tx.send(GrantUpdate).await;
                         tokio::spawn(poller.clone().poll_grant(
                             name.clone(),
                             duration_secs,

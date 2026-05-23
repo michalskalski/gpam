@@ -3,6 +3,7 @@ use std::time::Duration as StdDuration;
 
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
+use tracing::warn;
 
 use crate::backend::DynBackend;
 use crate::cache::{Cache, now_unix};
@@ -12,14 +13,10 @@ use crate::gcp::grants::GrantState;
 pub const DEFAULT_POLL_INTERVAL: StdDuration = StdDuration::from_secs(3);
 
 /// Wake-up sent by the poller after persisting one observation to the cache.
-/// The receiver re-reads the grant rows from the DB on each update.
+/// The receiver re-reads the grant rows from the DB on each update, so the
+/// signal itself carries no payload.
 #[derive(Debug, Clone)]
-pub struct GrantUpdate {
-    pub name: String,
-    /// Transient poll error (network, auth). The DB state isn't changed when
-    /// this is set.
-    pub error: Option<String>,
-}
+pub struct GrantUpdate;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PollMode {
@@ -86,26 +83,38 @@ impl Poller {
 
                     let stop =
                         terminal || state.is_active() || matches!(mode, PollMode::ConfirmOnce);
-                    let _ = self
-                        .tx
-                        .send(GrantUpdate {
-                            name: grant_name.clone(),
-                            error: None,
-                        })
-                        .await;
+                    let _ = self.tx.send(GrantUpdate).await;
                     if stop {
                         return;
                     }
                     last_state = state;
                 }
                 Err(e) => {
-                    let _ = self
-                        .tx
-                        .send(GrantUpdate {
-                            name: grant_name.clone(),
-                            error: Some(format!("{e:#}")),
-                        })
-                        .await;
+                    let msg = format!("{e:#}");
+                    // PERMISSION_DENIED or NOT_FOUND on get_grant means we can
+                    // no longer observe this grant - usually because the host
+                    // project was deleted or access was revoked. Treat it as
+                    // terminal locally so we stop polling forever.
+                    if msg.contains("PERMISSION_DENIED") || msg.contains("NOT_FOUND") {
+                        warn!(
+                            grant = %grant_name,
+                            error = %msg,
+                            "grant unobservable, marking Revoked locally and stopping poll"
+                        );
+                        {
+                            let cache = self.cache.lock().await;
+                            let _ = cache.update_grant_state(
+                                &grant_name,
+                                &GrantState::Revoked,
+                                None,
+                                None,
+                                now_unix(),
+                            );
+                        }
+                        let _ = self.tx.send(GrantUpdate).await;
+                        return;
+                    }
+                    warn!(grant = %grant_name, error = %msg, "grant poll failed");
                     if matches!(mode, PollMode::ConfirmOnce) {
                         return;
                     }

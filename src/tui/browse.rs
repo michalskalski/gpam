@@ -154,8 +154,8 @@ impl BrowseScreen {
                     }
                 }
                 update = self.grant_rx.recv() => {
-                    if let Some(update) = update {
-                        self.apply_grant_update(update).await;
+                    if update.is_some() {
+                        self.apply_grant_update().await;
                     }
                 }
                 _ = tick.tick() => {}
@@ -168,14 +168,13 @@ impl BrowseScreen {
         self.tracked_grants = cache.list_tracked_grants(now_unix()).unwrap_or_default();
     }
 
-    async fn apply_grant_update(&mut self, update: GrantUpdate) {
+    async fn apply_grant_update(&mut self) {
         // The poller has already persisted to the DB before sending.
         // reading back is the simplest way to keep state, timestamps, and the
-        // window-filter (recent-terminal rows) consistent.
+        // window-filter (recent-terminal rows) consistent. Poll errors flow
+        // through the tracing layer into the log file and `L` popup, so the
+        // status bar stays free for in-band UI feedback.
         self.reload_tracked_grants().await;
-        if let Some(err) = update.error {
-            self.status = format!("grant {}: {err}", short_id(&update.name));
-        }
     }
 
     /// Returns `Some(outcome)` when the screen wants to exit.
@@ -854,10 +853,6 @@ fn upsert_in_place(rows: &mut Vec<EntitlementRow>, row: EntitlementRow) {
     } else {
         rows.push(row);
     }
-}
-
-fn short_id(grant_name: &str) -> &str {
-    grant_name.rsplit('/').next().unwrap_or(grant_name)
 }
 
 /// Render one grant as a single line in the strip. Format:
