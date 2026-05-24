@@ -29,10 +29,10 @@ struct Modal {
 }
 
 impl Modal {
-    fn new(entitlement: EntitlementRow) -> Self {
+    fn new(entitlement: EntitlementRow, default_duration: &str, default_justification: &str) -> Self {
         Self {
-            duration: TextInput::with_text("1h"),
-            justification: TextInput::new(),
+            duration: TextInput::with_text(default_duration),
+            justification: TextInput::with_text(default_justification),
             field: Field::Duration,
             error: None,
             entitlement,
@@ -54,6 +54,21 @@ impl Modal {
         }
         Ok(secs)
     }
+}
+
+/// Reuse the previous duration input if it still passes this entitlement's
+/// bounds. Carry the raw typed string so the prefill matches what the user
+/// actually typed (e.g. "30m") rather than a reformatted "1800s".
+fn pick_default_duration(ent: &EntitlementRow, last: Option<&(String, i64)>) -> String {
+    if let Some((typed, secs)) = last
+        && *secs >= MIN_DURATION_SECS
+        && ent
+            .max_request_duration_secs
+            .map_or(true, |max| max <= 0 || *secs <= max)
+    {
+        return typed.clone();
+    }
+    "1h".into()
 }
 
 enum StepOutcome {
@@ -84,8 +99,16 @@ pub async fn run(
     let mut results: Vec<RequestResult> = Vec::new();
     let total = selected.len();
 
+    // Carry the previous submission across iterations so a user requesting
+    // many grants doesn't have to retype the same values. The duration
+    // prefill is dropped if it would violate the next entitlement's bounds.
+    let mut last_duration: Option<(String, i64)> = None;
+    let mut last_justification: Option<String> = None;
+
     for (i, ent) in selected.into_iter().enumerate() {
-        let mut modal = Modal::new(ent.clone());
+        let default_duration = pick_default_duration(&ent, last_duration.as_ref());
+        let default_justification = last_justification.clone().unwrap_or_default();
+        let mut modal = Modal::new(ent.clone(), &default_duration, &default_justification);
 
         let outcome = loop {
             term.draw(|f| render(f, &modal, &results, i, total))?;
@@ -107,6 +130,10 @@ pub async fn run(
                 duration_secs,
                 justification,
             } => {
+                last_duration = Some((modal.duration.as_str().to_string(), duration_secs));
+                if let Some(j) = &justification {
+                    last_justification = Some(j.clone());
+                }
                 let result = match poller
                     .backend
                     .create_grant(&ent.name, duration_secs, justification.as_deref())
