@@ -96,8 +96,15 @@ jobs:
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$VERSION" "$ARCHIVE" "$ARCHIVE.sha256"
+        run: gh release upload "$VERSION" "$ARCHIVE" "$ARCHIVE.sha256" --clobber
         shell: bash
+
+      - name: Upload sha256 as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sha256-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}.sha256
+          retention-days: 1
 
   homebrew:
     name: Bump Homebrew formula
@@ -107,20 +114,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Download sha256 files from release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for target in aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
-            gh release download "$VERSION" -R "${{ github.repository }}" \
-              -p "gpam-${VERSION}-${target}.tar.gz.sha256" -O "${target}.sha256"
-          done
+      - name: Download sha256 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sha256-*
+          merge-multiple: true
 
       - name: Render formula
         run: |
-          DARWIN_ARM=$(awk '{print $1}' aarch64-apple-darwin.sha256)
-          LINUX_ARM=$(awk '{print $1}' aarch64-unknown-linux-musl.sha256)
-          LINUX_X86=$(awk '{print $1}' x86_64-unknown-linux-musl.sha256)
+          DARWIN_ARM=$(awk '{print $1}' "gpam-${VERSION}-aarch64-apple-darwin.tar.gz.sha256")
+          LINUX_ARM=$(awk '{print $1}' "gpam-${VERSION}-aarch64-unknown-linux-musl.tar.gz.sha256")
+          LINUX_X86=$(awk '{print $1}' "gpam-${VERSION}-x86_64-unknown-linux-musl.tar.gz.sha256")
           VER="${VERSION#v}"
           BASE="https://github.com/${{ github.repository }}/releases/download/${VERSION}"
 
