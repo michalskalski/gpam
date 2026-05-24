@@ -1,3 +1,4 @@
+mod approval_queue;
 mod browse;
 mod keymap;
 mod request;
@@ -63,6 +64,10 @@ async fn run_inner(
     // browse loop drains lazily (e.g. while inside the request modal).
     let (grant_tx, grant_rx) = mpsc::channel(256);
 
+    // Shared queue of inbound approval events, drained by the approval-queue
+    // screen and surfaced by browse's status bar.
+    let approval_queue = approval_queue::new_queue();
+
     // Socket listener for forwarded approval events. `bind_or_skip` returns
     // None (with a logged warning) when another gpam instance already owns
     // the socket, so a second TUI still runs but without IPC. The cleanup
@@ -71,8 +76,7 @@ async fn run_inner(
         Some((listener, cleanup)) => {
             let (approval_tx, mut approval_rx) = mpsc::channel(64);
             tokio::spawn(ipc::listen(listener, approval_tx));
-            // Until the queue UI lands the events surface as log lines.
-            // The L popup picks them up via the existing tracing layer.
+            let queue_for_drainer = approval_queue.clone();
             tokio::spawn(async move {
                 while let Some(event) = approval_rx.recv().await {
                     tracing::info!(
@@ -80,6 +84,13 @@ async fn run_inner(
                         event.name,
                         event.source.as_deref().unwrap_or("-")
                     );
+                    let queued = approval_queue::QueuedEvent {
+                        event,
+                        received_at: std::time::SystemTime::now(),
+                    };
+                    if let Ok(mut q) = queue_for_drainer.lock() {
+                        q.push_back(queued);
+                    }
                 }
             });
             Some(cleanup)
@@ -103,19 +114,28 @@ async fn run_inner(
         backend.clone(),
         refresh_options,
         grant_rx,
+        approval_queue.clone(),
         log_state,
     )
     .await?;
 
     loop {
-        let Some(selection) = browse.run(term).await? else {
-            return Ok(());
-        };
-
-        // request::run handles its own summary screen on errors.
-        // the strip on browse will pick up successful grants via the poller's channel.
-        let _ = request::run(term, poller.clone(), selection).await?;
-        // always return to browse, only q from browse is the exit.
+        match browse.run(term).await? {
+            browse::BrowseExit::Quit => return Ok(()),
+            browse::BrowseExit::Request(selection) => {
+                // request::run handles its own summary screen on errors.
+                // The strip on browse will pick up successful grants via the
+                // poller's channel.
+                let _ = request::run(term, poller.clone(), selection).await?;
+            }
+            browse::BrowseExit::OpenApprovalQueue => {
+                match approval_queue::run(term, approval_queue.clone()).await? {
+                    approval_queue::QueueExit::Back => {}
+                    approval_queue::QueueExit::Quit => return Ok(()),
+                }
+            }
+        }
+        // Always return to browse. Only q from browse is the exit.
     }
 }
 

@@ -21,10 +21,20 @@ use crate::poller::GrantUpdate;
 use crate::refresh::{self, RefreshEvent, RefreshOptions};
 
 use super::Term;
+use super::approval_queue::Queue;
 use super::keymap::{Action, Focus, SearchMove, dispatch};
 use super::widgets::{TextInput, format_age};
 
 const STRIP_MAX_ROWS: usize = 5;
+
+/// What `BrowseScreen::run` decided to hand back to the outer loop. The
+/// caller dispatches the next screen (request or approval queue) based on
+/// the variant.
+pub enum BrowseExit {
+    Quit,
+    Request(Vec<EntitlementRow>),
+    OpenApprovalQueue,
+}
 
 pub struct BrowseScreen {
     account: String,
@@ -54,6 +64,8 @@ pub struct BrowseScreen {
     tracked_grants: Vec<GrantRow>,
     grant_rx: mpsc::Receiver<GrantUpdate>,
 
+    approval_queue: Queue,
+
     log_state: SharedLogState,
 }
 
@@ -64,6 +76,7 @@ impl BrowseScreen {
         backend: DynBackend,
         refresh_options: RefreshOptions,
         grant_rx: mpsc::Receiver<GrantUpdate>,
+        approval_queue: Queue,
         log_state: SharedLogState,
     ) -> Result<Self> {
         let (entitlements, last_refresh, tracked_grants) = {
@@ -109,11 +122,12 @@ impl BrowseScreen {
             refresh_tx,
             tracked_grants,
             grant_rx,
+            approval_queue,
             log_state,
         })
     }
 
-    pub async fn run(&mut self, term: &mut Term) -> Result<Option<Vec<EntitlementRow>>> {
+    pub async fn run(&mut self, term: &mut Term) -> Result<BrowseExit> {
         let mut events = EventStream::new();
 
         let decision = {
@@ -140,7 +154,7 @@ impl BrowseScreen {
                     if let Some(Ok(ev)) = ev
                         && let Some(outcome) = self.handle_event(ev)
                     {
-                        if outcome.is_some() {
+                        if matches!(outcome, BrowseExit::Request(_)) {
                             // After a submit, clear the selection so a return
                             // visit starts fresh.
                             self.selected.clear();
@@ -177,9 +191,8 @@ impl BrowseScreen {
         self.reload_tracked_grants().await;
     }
 
-    /// Returns `Some(outcome)` when the screen wants to exit.
-    /// `Some(Some(rows))` = submit those; `Some(None)` = user canceled; `None` = stay.
-    fn handle_event(&mut self, ev: Event) -> Option<Option<Vec<EntitlementRow>>> {
+    /// Returns `Some(exit)` when the screen wants to exit, `None` to stay.
+    fn handle_event(&mut self, ev: Event) -> Option<BrowseExit> {
         let key = match ev {
             Event::Key(k) if k.kind == KeyEventKind::Press => k,
             _ => return None,
@@ -189,7 +202,7 @@ impl BrowseScreen {
                 .modifiers
                 .contains(crossterm::event::KeyModifiers::CONTROL);
             if matches!(key.code, crossterm::event::KeyCode::Char('c')) && ctrl {
-                return Some(None);
+                return Some(BrowseExit::Quit);
             }
             self.show_help = false;
             self.show_logs = false;
@@ -199,9 +212,9 @@ impl BrowseScreen {
         self.apply(action)
     }
 
-    fn apply(&mut self, action: Action) -> Option<Option<Vec<EntitlementRow>>> {
+    fn apply(&mut self, action: Action) -> Option<BrowseExit> {
         match action {
-            Action::Quit => return Some(None),
+            Action::Quit => return Some(BrowseExit::Quit),
             Action::MoveUp(n) => {
                 if self.focus == Focus::Search {
                     self.focus = Focus::List;
@@ -249,7 +262,7 @@ impl BrowseScreen {
                 if chosen.is_empty() {
                     return None;
                 }
-                return Some(Some(chosen));
+                return Some(BrowseExit::Request(chosen));
             }
             Action::Refresh => self.start_refresh(),
             Action::FocusSearch => self.focus = Focus::Search,
@@ -268,7 +281,7 @@ impl BrowseScreen {
                 } else if !self.selected.is_empty() {
                     self.selected.clear();
                 } else {
-                    return Some(None);
+                    return Some(BrowseExit::Quit);
                 }
             }
             Action::SearchInsert(c) => {
@@ -322,6 +335,14 @@ impl BrowseScreen {
                     Some(s) => format!("scope filter: {s}"),
                 };
                 self.reindex();
+            }
+            Action::OpenApprovalQueue => {
+                let pending = self.approval_queue.lock().map(|q| q.len()).unwrap_or(0);
+                if pending == 0 {
+                    self.status = "no pending approvals".into();
+                } else {
+                    return Some(BrowseExit::OpenApprovalQueue);
+                }
             }
         }
         None
@@ -643,12 +664,18 @@ impl BrowseScreen {
         } else {
             String::new()
         };
+        let pending = self.approval_queue.lock().map(|q| q.len()).unwrap_or(0);
+        let pending_badge = if pending > 0 {
+            format!("[{pending} pending] ")
+        } else {
+            String::new()
+        };
         let keys = "L logs ? help";
         let dim = Style::default().add_modifier(Modifier::DIM);
-        let warn_style = Style::default()
+        let accent_style = Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD);
-        let right_len = warn.len() + keys.len() + 1;
+        let right_len = pending_badge.len() + warn.len() + keys.len() + 1;
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(0), Constraint::Length(right_len as u16)])
@@ -656,7 +683,8 @@ impl BrowseScreen {
         frame.render_widget(Paragraph::new(Span::styled(left, dim)), chunks[0]);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(warn, warn_style),
+                Span::styled(pending_badge, accent_style),
+                Span::styled(warn, accent_style),
                 Span::styled(keys, dim),
             ])),
             chunks[1],
@@ -688,6 +716,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         ("f", "cycle scope filter"),
         ("m", "show marked only"),
         ("J", "toggle raw JSON"),
+        ("A", "open approval queue"),
         ("R", "refresh"),
         ("L", "show warn/error log"),
         ("?", "this help"),

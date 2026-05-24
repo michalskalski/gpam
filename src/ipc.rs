@@ -9,6 +9,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 
+use crate::gcp::Scope;
+
 /// An approval event delivered to a running gpam TUI over its local socket.
 /// On the wire: one JSON object per line.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,22 +53,46 @@ pub async fn send(path: &Path, event: &ApprovalEvent) -> Result<()> {
     Ok(())
 }
 
-/// Shape check for a fully-qualified PAM grant resource name:
-/// `<scope-root>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>` where
-/// `<scope-root>` is `organizations`, `folders`, or `projects`.
-pub fn is_valid_grant_name(s: &str) -> bool {
+/// Fields parsed out of a fully-qualified PAM grant resource name:
+/// `<scope-root>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>`.
+#[derive(Debug, Clone, Copy)]
+pub struct GrantNameParts<'a> {
+    pub scope: Scope,
+    pub scope_id: &'a str,
+    pub entitlement: &'a str,
+}
+
+/// Parse the grant resource name into its useful pieces, or return `None`
+/// when the shape doesn't match what PAM produces.
+pub fn parse_grant_name(s: &str) -> Option<GrantNameParts<'_>> {
     let parts: Vec<&str> = s.split('/').collect();
-    if parts.len() != 8 {
-        return false;
+    if parts.len() != 8
+        || parts[2] != "locations"
+        || parts[4] != "entitlements"
+        || parts[6] != "grants"
+        || parts[1].is_empty()
+        || parts[3].is_empty()
+        || parts[5].is_empty()
+        || parts[7].is_empty()
+    {
+        return None;
     }
-    matches!(parts[0], "organizations" | "folders" | "projects")
-        && !parts[1].is_empty()
-        && parts[2] == "locations"
-        && !parts[3].is_empty()
-        && parts[4] == "entitlements"
-        && !parts[5].is_empty()
-        && parts[6] == "grants"
-        && !parts[7].is_empty()
+    let scope = match parts[0] {
+        "organizations" => Scope::Organization,
+        "folders" => Scope::Folder,
+        "projects" => Scope::Project,
+        _ => return None,
+    };
+    Some(GrantNameParts {
+        scope,
+        scope_id: parts[1],
+        entitlement: parts[5],
+    })
+}
+
+/// Shape check for a fully-qualified PAM grant resource name.
+pub fn is_valid_grant_name(s: &str) -> bool {
+    parse_grant_name(s).is_some()
 }
 
 /// Removes the socket file when dropped. Pair it with `bind_or_skip` so the

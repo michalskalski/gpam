@@ -29,6 +29,7 @@ pub enum Action {
     ToggleRaw,
     CycleScopeFilter,
     ToggleMarkedView,
+    OpenApprovalQueue,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -76,6 +77,7 @@ fn list_action(key: KeyEvent, ctrl: bool) -> Option<Action> {
         Char('J') => Action::ToggleRaw,
         Char('f') if !ctrl => Action::CycleScopeFilter,
         Char('m') if !ctrl => Action::ToggleMarkedView,
+        Char('A') => Action::OpenApprovalQueue,
         _ => return None,
     })
 }
@@ -221,6 +223,19 @@ mod tests {
         assert!(matches!(
             dispatch(Focus::Search, key(KeyCode::Char('m'))),
             Some(Action::SearchInsert('m'))
+        ));
+    }
+
+    #[test]
+    fn capital_a_opens_approval_queue_in_list_focus_only() {
+        assert!(matches!(
+            dispatch(Focus::List, key(KeyCode::Char('A'))),
+            Some(Action::OpenApprovalQueue)
+        ));
+        // 'A' in the search box stays a literal character.
+        assert!(matches!(
+            dispatch(Focus::Search, key(KeyCode::Char('A'))),
+            Some(Action::SearchInsert('A'))
         ));
     }
 
