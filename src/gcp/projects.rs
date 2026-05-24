@@ -1,6 +1,7 @@
 use anyhow::Result;
 use google_cloud_gax::paginator::ItemPaginator;
 use google_cloud_resourcemanager_v3::client::Projects;
+use google_cloud_resourcemanager_v3::model::project::State;
 
 use crate::cache::{ProjectRow, now_unix};
 
@@ -16,8 +17,7 @@ pub async fn list_visible(client: &Projects) -> Result<Vec<ProjectRow>> {
         if p.project_id.is_empty() {
             continue;
         }
-        let state = format!("{:?}", p.state);
-        if !state.contains("Active") {
+        if !matches!(p.state, State::Active) {
             continue;
         }
         out.push(ProjectRow {
@@ -27,7 +27,7 @@ pub async fn list_visible(client: &Projects) -> Result<Vec<ProjectRow>> {
             } else {
                 Some(p.display_name)
             },
-            state: Some(state),
+            state: Some("ACTIVE".to_string()),
             fetched_at,
         });
     }

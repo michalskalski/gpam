@@ -20,7 +20,7 @@ impl TextInput {
         &self.buf
     }
 
-    #[allow(dead_code)] // exposed for future widget composition
+    #[cfg(test)]
     pub fn cursor(&self) -> usize {
         self.cursor
     }

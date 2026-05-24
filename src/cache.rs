@@ -205,7 +205,7 @@ impl Cache {
         Ok(Self { conn })
     }
 
-    #[allow(dead_code)] // used by integration tests
+    #[cfg(test)]
     pub fn open_at(path: &Path) -> Result<Self> {
         let mut conn = Connection::open(path)?;
         ensure_schema(&mut conn, Some(path))?;
