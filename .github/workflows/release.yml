@@ -155,9 +155,7 @@ jobs:
             end
 
             def install
-              arch = Hardware::CPU.arm? ? "aarch64" : "x86_64"
-              platform = OS.mac? ? "apple-darwin" : "unknown-linux-musl"
-              bin.install "gpam-${VERSION}-#{arch}-#{platform}/gpam"
+              bin.install "gpam"
             end
 
             test do
@@ -176,11 +174,11 @@ jobs:
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then
+          git add Formula/gpam.rb
+          if git diff --cached --quiet; then
             echo "Formula already up to date"
             exit 0
           fi
-          git add Formula/gpam.rb
           git commit -m "gpam ${VERSION}"
           git push
 
