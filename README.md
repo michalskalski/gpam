@@ -1,8 +1,28 @@
 # gpam
 
+[![CI](https://github.com/michalskalski/gpam/actions/workflows/ci.yml/badge.svg)](https://github.com/michalskalski/gpam/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/gpam.svg)](https://crates.io/crates/gpam)
+
 Terminal UI for [Google Cloud Privileged Access Manager](https://docs.cloud.google.com/iam/docs/pam-overview). Browse the entitlements you can request, submit grants with duration + justification, and watch them transition to Active.
 
 ![gpam demo](demo/gpam.gif)
+
+## Install
+
+Homebrew (macOS and Linux):
+
+```
+brew install michalskalski/gpam/gpam
+```
+
+From crates.io:
+
+```
+cargo install gpam
+```
+
+Pre-built binaries for Linux and macOS are available on the
+[GitHub releases page](https://github.com/michalskalski/gpam/releases).
 
 ## Quick start
 
@@ -61,3 +81,7 @@ Together they can compose a clean fallback: `gpam send "$NAME" || gpam approve "
 ## Cache
 
 Per-account SQLite at `~/Library/Caches/gpam/<account>.db` (macOS) or `~/.cache/gpam/<account>.db` (Linux). Soft freshness 30 m (background refresh), hard 24 h (block on refresh).
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.
