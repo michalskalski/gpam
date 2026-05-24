@@ -800,8 +800,8 @@ fn render_help(frame: &mut Frame, area: Rect) {
 }
 
 fn render_logs_popup(frame: &mut Frame, area: Rect, last: Option<&LogEntry>, log_path: &str) {
-    let w = area.width.saturating_sub(4).min(80).max(40);
-    let h = area.height.saturating_sub(2).min(16).max(8);
+    let w = area.width.saturating_sub(4).clamp(40, 80);
+    let h = area.height.saturating_sub(2).clamp(8, 16);
     let x = area.x + area.width.saturating_sub(w) / 2;
     let y = area.y + area.height.saturating_sub(h) / 2;
     let rect = Rect {

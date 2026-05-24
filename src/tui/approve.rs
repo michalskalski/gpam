@@ -69,11 +69,7 @@ struct Modal {
 
 /// Open the approve modal for a known grant name. Fetches details first; on
 /// fetch error or terminal-state grant the modal opens in the result step.
-pub async fn run(
-    term: &mut Term,
-    backend: DynBackend,
-    name: String,
-) -> Result<ApproveOutcome> {
+pub async fn run(term: &mut Term, backend: DynBackend, name: String) -> Result<ApproveOutcome> {
     let mut modal = match backend.get_grant_details(&name).await {
         Ok(d) if d.state.is_terminal() => Modal {
             reason: TextInput::new(),

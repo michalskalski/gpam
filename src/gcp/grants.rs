@@ -279,9 +279,14 @@ pub async fn get_details(
 /// Parse the scope segments and entitlement short name out of a fully-qualified
 /// grant resource name: `<plural>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>`.
 fn parse_scope_from_name(name: &str) -> Result<(Scope, String, String)> {
-    let parts = parse_grant_name(name)
-        .ok_or_else(|| anyhow::anyhow!("grant name does not match expected resource shape: '{name}'"))?;
-    Ok((parts.scope, parts.scope_id.to_string(), parts.entitlement.to_string()))
+    let parts = parse_grant_name(name).ok_or_else(|| {
+        anyhow::anyhow!("grant name does not match expected resource shape: '{name}'")
+    })?;
+    Ok((
+        parts.scope,
+        parts.scope_id.to_string(),
+        parts.entitlement.to_string(),
+    ))
 }
 
 /// Fields parsed out of a fully-qualified PAM grant resource name:
@@ -397,25 +402,21 @@ mod tests {
 
     #[test]
     fn parses_scope_from_grant_name() {
-        let (s, id, ent) = parse_scope_from_name(
-            "organizations/123/locations/global/entitlements/foo/grants/abc",
-        )
-        .unwrap();
+        let (s, id, ent) =
+            parse_scope_from_name("organizations/123/locations/global/entitlements/foo/grants/abc")
+                .unwrap();
         assert_eq!(s, Scope::Organization);
         assert_eq!(id, "123");
         assert_eq!(ent, "foo");
 
         let (s, id, ent) =
-            parse_scope_from_name("projects/p/locations/global/entitlements/bar/grants/g")
-                .unwrap();
+            parse_scope_from_name("projects/p/locations/global/entitlements/bar/grants/g").unwrap();
         assert_eq!(s, Scope::Project);
         assert_eq!(id, "p");
         assert_eq!(ent, "bar");
 
         assert!(parse_scope_from_name("garbage").is_err());
-        assert!(
-            parse_scope_from_name("users/1/locations/global/entitlements/e/grants/g").is_err()
-        );
+        assert!(parse_scope_from_name("users/1/locations/global/entitlements/e/grants/g").is_err());
     }
 
     #[test]
@@ -451,10 +452,9 @@ mod tests {
 
     #[test]
     fn parse_grant_name_exposes_parts() {
-        let p = parse_grant_name(
-            "projects/p123/locations/global/entitlements/my-ent/grants/uuid-abc",
-        )
-        .unwrap();
+        let p =
+            parse_grant_name("projects/p123/locations/global/entitlements/my-ent/grants/uuid-abc")
+                .unwrap();
         assert_eq!(p.scope, Scope::Project);
         assert_eq!(p.scope_id, "p123");
         assert_eq!(p.entitlement, "my-ent");

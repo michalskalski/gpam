@@ -29,7 +29,11 @@ struct Modal {
 }
 
 impl Modal {
-    fn new(entitlement: EntitlementRow, default_duration: &str, default_justification: &str) -> Self {
+    fn new(
+        entitlement: EntitlementRow,
+        default_duration: &str,
+        default_justification: &str,
+    ) -> Self {
         Self {
             duration: TextInput::with_text(default_duration),
             justification: TextInput::with_text(default_justification),
@@ -64,7 +68,7 @@ fn pick_default_duration(ent: &EntitlementRow, last: Option<&(String, i64)>) -> 
         && *secs >= MIN_DURATION_SECS
         && ent
             .max_request_duration_secs
-            .map_or(true, |max| max <= 0 || *secs <= max)
+            .is_none_or(|max| max <= 0 || *secs <= max)
     {
         return typed.clone();
     }

@@ -1,0 +1,197 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.2.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build only — leave release as draft, do not publish or bump Homebrew formula'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  VERSION: ${{ inputs.tag }}
+
+jobs:
+  create-release:
+    name: Create release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ env.VERSION }}
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            echo "Release $VERSION already exists, ensuring it is a draft"
+            gh release edit "$VERSION" --draft
+          else
+            gh release create "$VERSION" --draft --generate-notes --title "$VERSION"
+          fi
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use_cross: false
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ env.VERSION }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
+        with:
+          target: ${{ matrix.target }}
+          # Disable cache for cross builds. Cached host build scripts link against
+          # the runner's glibc, which is newer than glibc inside cross's Docker image.
+          # https://github.com/cross-rs/cross/issues/724
+          cache: ${{ !matrix.use_cross }}
+
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --version 0.2.5 --locked
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Package
+        run: |
+          ARCHIVE="gpam-${VERSION}-${{ matrix.target }}.tar.gz"
+          STAGING="gpam-${VERSION}-${{ matrix.target }}"
+          mkdir "$STAGING"
+          cp "target/${{ matrix.target }}/release/gpam" "$STAGING/"
+          cp LICENSE-MIT LICENSE-APACHE README.md "$STAGING/"
+          tar czf "$ARCHIVE" "$STAGING"
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$VERSION" "$ARCHIVE" "$ARCHIVE.sha256"
+        shell: bash
+
+  homebrew:
+    name: Bump Homebrew formula
+    if: inputs.dry_run != true
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download sha256 files from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for target in aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            gh release download "$VERSION" -R "${{ github.repository }}" \
+              -p "gpam-${VERSION}-${target}.tar.gz.sha256" -O "${target}.sha256"
+          done
+
+      - name: Render formula
+        run: |
+          DARWIN_ARM=$(awk '{print $1}' aarch64-apple-darwin.sha256)
+          LINUX_ARM=$(awk '{print $1}' aarch64-unknown-linux-musl.sha256)
+          LINUX_X86=$(awk '{print $1}' x86_64-unknown-linux-musl.sha256)
+          VER="${VERSION#v}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/${VERSION}"
+
+          mkdir -p Formula
+          cat > Formula/gpam.rb <<EOF
+          class Gpam < Formula
+            desc "Terminal UI for Google Cloud Privileged Access Manager"
+            homepage "https://github.com/${{ github.repository }}"
+            version "${VER}"
+            license any_of: ["MIT", "Apache-2.0"]
+
+            on_macos do
+              on_arm do
+                url "${BASE}/gpam-${VERSION}-aarch64-apple-darwin.tar.gz"
+                sha256 "${DARWIN_ARM}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "${BASE}/gpam-${VERSION}-aarch64-unknown-linux-musl.tar.gz"
+                sha256 "${LINUX_ARM}"
+              end
+              on_intel do
+                url "${BASE}/gpam-${VERSION}-x86_64-unknown-linux-musl.tar.gz"
+                sha256 "${LINUX_X86}"
+              end
+            end
+
+            def install
+              arch = Hardware::CPU.arm? ? "aarch64" : "x86_64"
+              platform = OS.mac? ? "apple-darwin" : "unknown-linux-musl"
+              bin.install "gpam-${VERSION}-#{arch}-#{platform}/gpam"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/gpam --version")
+            end
+          end
+          EOF
+
+      - name: Push to tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/michalskalski/homebrew-gpam.git" tap
+          mkdir -p tap/Formula
+          cp Formula/gpam.rb tap/Formula/gpam.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Formula already up to date"
+            exit 0
+          fi
+          git add Formula/gpam.rb
+          git commit -m "gpam ${VERSION}"
+          git push
+
+  publish-release:
+    name: Publish release
+    if: inputs.dry_run != true
+    needs: [build, homebrew]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ env.VERSION }}
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$VERSION" --draft=false
