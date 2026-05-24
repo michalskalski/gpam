@@ -72,6 +72,7 @@ pub async fn run(term: &mut Term, backend: DynBackend, queue: Queue) -> Result<Q
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
+                #[allow(clippy::collapsible_match)]
                 match decide(key) {
                     Some(QueueAction::Up) => cursor = cursor.saturating_sub(1),
                     Some(QueueAction::Down) => {
