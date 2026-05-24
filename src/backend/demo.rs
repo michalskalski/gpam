@@ -6,9 +6,11 @@ use async_trait::async_trait;
 
 use crate::backend::{Backend, ScopeTarget};
 use crate::cache::{EntitlementRow, FolderRow, OrganizationRow, ProjectRow, now_unix};
+use anyhow::bail;
+
 use crate::gcp::Scope;
 use crate::gcp::entitlements::parent;
-use crate::gcp::grants::GrantState;
+use crate::gcp::grants::{GrantDetails, GrantState, RoleBindingView};
 
 /// Seeded data + in-memory grant state machine. Lets the binary be tried
 /// without GCP credentials -- `--demo` swaps this in for [`GcpBackend`].
@@ -305,4 +307,48 @@ impl Backend for DemoBackend {
         };
         Ok(grant.state.clone())
     }
+
+    async fn get_grant_details(&self, grant_name: &str) -> Result<GrantDetails> {
+        let (scope_type, scope_id, entitlement_short_name) = parse_demo_grant_name(grant_name)?;
+        Ok(GrantDetails {
+            name: grant_name.to_string(),
+            state: GrantState::ApprovalAwaited,
+            requester: "demo-user@example.com".to_string(),
+            requested_duration_secs: 3600,
+            justification: Some("demo fixture: investigating a fake outage".to_string()),
+            role_bindings: vec![RoleBindingView {
+                role: "roles/viewer".to_string(),
+                condition: None,
+            }],
+            scope_type,
+            scope_id,
+            entitlement_short_name,
+        })
+    }
+
+    async fn approve_grant(&self, _grant_name: &str, _reason: Option<&str>) -> Result<()> {
+        Ok(())
+    }
+
+    async fn deny_grant(&self, _grant_name: &str, _reason: Option<&str>) -> Result<()> {
+        Ok(())
+    }
+}
+
+fn parse_demo_grant_name(name: &str) -> Result<(Scope, String, String)> {
+    let parts: Vec<&str> = name.split('/').collect();
+    if parts.len() != 8
+        || parts[2] != "locations"
+        || parts[4] != "entitlements"
+        || parts[6] != "grants"
+    {
+        bail!("not a grant resource name: '{name}'");
+    }
+    let scope = match parts[0] {
+        "organizations" => Scope::Organization,
+        "folders" => Scope::Folder,
+        "projects" => Scope::Project,
+        other => bail!("unknown scope segment '{other}'"),
+    };
+    Ok((scope, parts[1].to_string(), parts[5].to_string()))
 }

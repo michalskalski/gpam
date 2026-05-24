@@ -9,7 +9,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 
-use crate::gcp::Scope;
+use crate::gcp::grants::is_valid_grant_name;
 
 /// An approval event delivered to a running gpam TUI over its local socket.
 /// On the wire: one JSON object per line.
@@ -51,48 +51,6 @@ pub async fn send(path: &Path, event: &ApprovalEvent) -> Result<()> {
     // Half-close so the listener sees EOF after our single line.
     let _ = stream.shutdown().await;
     Ok(())
-}
-
-/// Fields parsed out of a fully-qualified PAM grant resource name:
-/// `<scope-root>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>`.
-#[derive(Debug, Clone, Copy)]
-pub struct GrantNameParts<'a> {
-    pub scope: Scope,
-    pub scope_id: &'a str,
-    pub entitlement: &'a str,
-}
-
-/// Parse the grant resource name into its useful pieces, or return `None`
-/// when the shape doesn't match what PAM produces.
-pub fn parse_grant_name(s: &str) -> Option<GrantNameParts<'_>> {
-    let parts: Vec<&str> = s.split('/').collect();
-    if parts.len() != 8
-        || parts[2] != "locations"
-        || parts[4] != "entitlements"
-        || parts[6] != "grants"
-        || parts[1].is_empty()
-        || parts[3].is_empty()
-        || parts[5].is_empty()
-        || parts[7].is_empty()
-    {
-        return None;
-    }
-    let scope = match parts[0] {
-        "organizations" => Scope::Organization,
-        "folders" => Scope::Folder,
-        "projects" => Scope::Project,
-        _ => return None,
-    };
-    Some(GrantNameParts {
-        scope,
-        scope_id: parts[1],
-        entitlement: parts[5],
-    })
-}
-
-/// Shape check for a fully-qualified PAM grant resource name.
-pub fn is_valid_grant_name(s: &str) -> bool {
-    parse_grant_name(s).is_some()
 }
 
 /// Removes the socket file when dropped. Pair it with `bind_or_skip` so the
@@ -229,40 +187,6 @@ mod tests {
 
     const ORG_NAME: &str = "organizations/000000000000/locations/global/entitlements/example-org-ent/grants/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     const PROJ_NAME: &str = "projects/111122223333/locations/global/entitlements/example-proj-ent/grants/11111111-2222-3333-4444-555555555555";
-    const FOLDER_NAME: &str = "folders/222233334444/locations/global/entitlements/example-folder-ent/grants/55555555-6666-7777-8888-999999999999";
-
-    #[test]
-    fn validator_accepts_org_folder_project() {
-        assert!(is_valid_grant_name(ORG_NAME));
-        assert!(is_valid_grant_name(FOLDER_NAME));
-        assert!(is_valid_grant_name(PROJ_NAME));
-    }
-
-    #[test]
-    fn validator_rejects_wrong_scope_root() {
-        assert!(!is_valid_grant_name(
-            "users/1/locations/global/entitlements/e/grants/g"
-        ));
-    }
-
-    #[test]
-    fn validator_rejects_missing_segments() {
-        assert!(!is_valid_grant_name("organizations/1/locations/global"));
-    }
-
-    #[test]
-    fn validator_rejects_empty_id() {
-        assert!(!is_valid_grant_name(
-            "organizations//locations/global/entitlements/e/grants/g"
-        ));
-    }
-
-    #[test]
-    fn validator_rejects_url() {
-        assert!(!is_valid_grant_name(
-            "https://console.cloud.google.com/iam-admin/pam/grants"
-        ));
-    }
 
     #[test]
     fn event_round_trip_with_source() {

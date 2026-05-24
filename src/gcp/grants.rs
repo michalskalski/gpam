@@ -9,6 +9,8 @@ use rusqlite::ToSql;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 
+use crate::gcp::Scope;
+
 /// PAM grant state as understood by gpam.
 ///
 /// Mirrors the variants from PAM v1 (`grant::State`) plus a local `Requested`
@@ -171,6 +173,159 @@ pub async fn get(client: &PrivilegedAccessManager, grant_name: &str) -> Result<G
         .context("get_grant")
 }
 
+/// Approve a grant in `APPROVAL_AWAITED` state. `reason` is sent only if
+/// non-empty; some workflows require it, most accept it as optional metadata.
+pub async fn approve(
+    client: &PrivilegedAccessManager,
+    grant_name: &str,
+    reason: Option<&str>,
+) -> Result<()> {
+    let mut req = client.approve_grant().set_name(grant_name);
+    if let Some(r) = reason.filter(|s| !s.is_empty()) {
+        req = req.set_reason(r);
+    }
+    req.send().await.context("approve_grant")?;
+    Ok(())
+}
+
+/// Deny a grant in `APPROVAL_AWAITED` state.
+pub async fn deny(
+    client: &PrivilegedAccessManager,
+    grant_name: &str,
+    reason: Option<&str>,
+) -> Result<()> {
+    let mut req = client.deny_grant().set_name(grant_name);
+    if let Some(r) = reason.filter(|s| !s.is_empty()) {
+        req = req.set_reason(r);
+    }
+    req.send().await.context("deny_grant")?;
+    Ok(())
+}
+
+/// Subset of a PAM `Grant` we need to render an approval decision screen.
+/// Decoupled from the SDK type so the modal doesn't grow a dependency on it
+/// and the demo backend can construct one without round-tripping through the
+/// real Grant model.
+#[derive(Debug, Clone)]
+pub struct GrantDetails {
+    pub name: String,
+    pub state: GrantState,
+    pub requester: String,
+    pub requested_duration_secs: i64,
+    pub justification: Option<String>,
+    pub role_bindings: Vec<RoleBindingView>,
+    pub scope_type: Scope,
+    pub scope_id: String,
+    pub entitlement_short_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RoleBindingView {
+    pub role: String,
+    pub condition: Option<String>,
+}
+
+/// Fetch a grant and project it into [`GrantDetails`] suitable for rendering.
+pub async fn get_details(
+    client: &PrivilegedAccessManager,
+    grant_name: &str,
+) -> Result<GrantDetails> {
+    let g = get(client, grant_name).await?;
+    let (scope_type, scope_id, entitlement_short_name) = parse_scope_from_name(&g.name)?;
+
+    let requested_duration_secs = g
+        .requested_duration
+        .as_ref()
+        .map(|d| d.seconds())
+        .unwrap_or(0);
+
+    let justification = g
+        .justification
+        .as_ref()
+        .and_then(|j| j.unstructured_justification().cloned());
+
+    let role_bindings = g
+        .privileged_access
+        .as_ref()
+        .and_then(|p| p.gcp_iam_access())
+        .map(|a| {
+            a.role_bindings
+                .iter()
+                .map(|rb| RoleBindingView {
+                    role: rb.role.clone(),
+                    condition: if rb.condition_expression.is_empty() {
+                        None
+                    } else {
+                        Some(rb.condition_expression.clone())
+                    },
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(GrantDetails {
+        state: GrantState::from_sdk(&g.state),
+        name: g.name,
+        requester: g.requester,
+        requested_duration_secs,
+        justification,
+        role_bindings,
+        scope_type,
+        scope_id,
+        entitlement_short_name,
+    })
+}
+
+/// Parse the scope segments and entitlement short name out of a fully-qualified
+/// grant resource name: `<plural>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>`.
+fn parse_scope_from_name(name: &str) -> Result<(Scope, String, String)> {
+    let parts = parse_grant_name(name)
+        .ok_or_else(|| anyhow::anyhow!("grant name does not match expected resource shape: '{name}'"))?;
+    Ok((parts.scope, parts.scope_id.to_string(), parts.entitlement.to_string()))
+}
+
+/// Fields parsed out of a fully-qualified PAM grant resource name:
+/// `<scope-root>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>`.
+#[derive(Debug, Clone, Copy)]
+pub struct GrantNameParts<'a> {
+    pub scope: Scope,
+    pub scope_id: &'a str,
+    pub entitlement: &'a str,
+}
+
+/// Parse the grant resource name into its useful pieces, or return `None`
+/// when the shape doesn't match what PAM produces.
+pub fn parse_grant_name(s: &str) -> Option<GrantNameParts<'_>> {
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 8
+        || parts[2] != "locations"
+        || parts[4] != "entitlements"
+        || parts[6] != "grants"
+        || parts[1].is_empty()
+        || parts[3].is_empty()
+        || parts[5].is_empty()
+        || parts[7].is_empty()
+    {
+        return None;
+    }
+    let scope = match parts[0] {
+        "organizations" => Scope::Organization,
+        "folders" => Scope::Folder,
+        "projects" => Scope::Project,
+        _ => return None,
+    };
+    Some(GrantNameParts {
+        scope,
+        scope_id: parts[1],
+        entitlement: parts[5],
+    })
+}
+
+/// Shape check for a fully-qualified PAM grant resource name.
+pub fn is_valid_grant_name(s: &str) -> bool {
+    parse_grant_name(s).is_some()
+}
+
 /// Parse a duration like `1h`, `30m`, `5400s`, or bare integer seconds.
 pub fn parse_duration(s: &str) -> Option<i64> {
     let s = s.trim();
@@ -238,6 +393,71 @@ mod tests {
         assert!(!GrantState::Activating.is_active());
         assert!(!GrantState::ActivationFailed.is_active());
         assert!(GrantState::Active.is_active());
+    }
+
+    #[test]
+    fn parses_scope_from_grant_name() {
+        let (s, id, ent) = parse_scope_from_name(
+            "organizations/123/locations/global/entitlements/foo/grants/abc",
+        )
+        .unwrap();
+        assert_eq!(s, Scope::Organization);
+        assert_eq!(id, "123");
+        assert_eq!(ent, "foo");
+
+        let (s, id, ent) =
+            parse_scope_from_name("projects/p/locations/global/entitlements/bar/grants/g")
+                .unwrap();
+        assert_eq!(s, Scope::Project);
+        assert_eq!(id, "p");
+        assert_eq!(ent, "bar");
+
+        assert!(parse_scope_from_name("garbage").is_err());
+        assert!(
+            parse_scope_from_name("users/1/locations/global/entitlements/e/grants/g").is_err()
+        );
+    }
+
+    #[test]
+    fn validator_accepts_org_folder_project() {
+        assert!(is_valid_grant_name(
+            "organizations/0/locations/global/entitlements/e/grants/g"
+        ));
+        assert!(is_valid_grant_name(
+            "folders/1/locations/global/entitlements/e/grants/g"
+        ));
+        assert!(is_valid_grant_name(
+            "projects/p/locations/global/entitlements/e/grants/g"
+        ));
+    }
+
+    #[test]
+    fn validator_rejects_bad_shapes() {
+        // wrong scope root
+        assert!(!is_valid_grant_name(
+            "users/1/locations/global/entitlements/e/grants/g"
+        ));
+        // missing segments
+        assert!(!is_valid_grant_name("organizations/1/locations/global"));
+        // empty id slot
+        assert!(!is_valid_grant_name(
+            "organizations//locations/global/entitlements/e/grants/g"
+        ));
+        // a URL
+        assert!(!is_valid_grant_name(
+            "https://console.cloud.google.com/iam-admin/pam/grants"
+        ));
+    }
+
+    #[test]
+    fn parse_grant_name_exposes_parts() {
+        let p = parse_grant_name(
+            "projects/p123/locations/global/entitlements/my-ent/grants/uuid-abc",
+        )
+        .unwrap();
+        assert_eq!(p.scope, Scope::Project);
+        assert_eq!(p.scope_id, "p123");
+        assert_eq!(p.entitlement, "my-ent");
     }
 
     #[test]

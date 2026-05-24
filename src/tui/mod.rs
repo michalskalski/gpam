@@ -1,4 +1,5 @@
 mod approval_queue;
+mod approve;
 mod browse;
 mod keymap;
 mod request;
@@ -48,6 +49,16 @@ pub async fn run(
     // always restore terminal
     let _ = restore_terminal();
     result
+}
+
+/// One-shot standalone modal for the `gpam approve <name>` subcommand. Sets
+/// up its own terminal, runs the approve modal, and always restores the
+/// terminal on exit.
+pub async fn run_approve(backend: DynBackend, name: String) -> Result<()> {
+    let mut term = init_terminal()?;
+    let result = approve::run(&mut term, backend, name).await;
+    let _ = restore_terminal();
+    result.map(|_| ())
 }
 
 async fn run_inner(
@@ -129,7 +140,7 @@ async fn run_inner(
                 let _ = request::run(term, poller.clone(), selection).await?;
             }
             browse::BrowseExit::OpenApprovalQueue => {
-                match approval_queue::run(term, approval_queue.clone()).await? {
+                match approval_queue::run(term, backend.clone(), approval_queue.clone()).await? {
                     approval_queue::QueueExit::Back => {}
                     approval_queue::QueueExit::Quit => return Ok(()),
                 }

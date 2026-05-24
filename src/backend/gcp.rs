@@ -9,7 +9,7 @@ use google_cloud_resourcemanager_v3::client::{Folders, Organizations, Projects};
 use crate::backend::{Backend, ScopeTarget};
 use crate::cache::{EntitlementRow, FolderRow, OrganizationRow, ProjectRow};
 use crate::gcp;
-use crate::gcp::grants::GrantState;
+use crate::gcp::grants::{GrantDetails, GrantState};
 
 pub struct GcpBackend {
     pam: Arc<PrivilegedAccessManager>,
@@ -63,5 +63,17 @@ impl Backend for GcpBackend {
     async fn get_grant_state(&self, grant_name: &str) -> Result<GrantState> {
         let g = gcp::grants::get(&self.pam, grant_name).await?;
         Ok(GrantState::from_sdk(&g.state))
+    }
+
+    async fn get_grant_details(&self, grant_name: &str) -> Result<GrantDetails> {
+        gcp::grants::get_details(&self.pam, grant_name).await
+    }
+
+    async fn approve_grant(&self, grant_name: &str, reason: Option<&str>) -> Result<()> {
+        gcp::grants::approve(&self.pam, grant_name, reason).await
+    }
+
+    async fn deny_grant(&self, grant_name: &str, reason: Option<&str>) -> Result<()> {
+        gcp::grants::deny(&self.pam, grant_name, reason).await
     }
 }

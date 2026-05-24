@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use crate::cache::{EntitlementRow, FolderRow, OrganizationRow, ProjectRow};
 use crate::gcp::Scope;
-use crate::gcp::grants::GrantState;
+use crate::gcp::grants::{GrantDetails, GrantState};
 
 pub type DynBackend = Arc<dyn Backend>;
 
@@ -46,4 +46,14 @@ pub trait Backend: Send + Sync {
 
     /// Single grant state read
     async fn get_grant_state(&self, grant_name: &str) -> Result<GrantState>;
+
+    /// Fetch enough of a grant to render an approval decision (requester,
+    /// roles, justification, duration, scope).
+    async fn get_grant_details(&self, grant_name: &str) -> Result<GrantDetails>;
+
+    /// Approve an `APPROVAL_AWAITED` grant. Irreversible.
+    async fn approve_grant(&self, grant_name: &str, reason: Option<&str>) -> Result<()>;
+
+    /// Deny an `APPROVAL_AWAITED` grant. Irreversible.
+    async fn deny_grant(&self, grant_name: &str, reason: Option<&str>) -> Result<()>;
 }

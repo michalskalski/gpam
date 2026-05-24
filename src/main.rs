@@ -59,6 +59,14 @@ enum Command {
         #[arg(long)]
         source: Option<String>,
     },
+    /// Open a one-shot approve modal in this terminal for a known grant.
+    ///
+    /// Use this when no TUI is running (e.g. as the `||` fallback after
+    /// `gpam send`). Does not touch the IPC socket.
+    Approve {
+        /// Fully-qualified PAM grant resource name.
+        name: String,
+    },
 }
 
 impl Args {
@@ -73,16 +81,38 @@ impl Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
-
-    match args.command {
+    let mut args = Args::parse();
+    match args.command.take() {
         Some(Command::Send { name, source }) => run_send(name, source).await,
+        Some(Command::Approve { name }) => run_approve(args, name).await,
         None => run_tui(args).await,
     }
 }
 
+async fn run_approve(args: Args, name: String) -> Result<()> {
+    if !gcp::grants::is_valid_grant_name(&name) {
+        bail!(
+            "'{name}' is not a valid grant resource name; expected '<organizations|folders|projects>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>'"
+        );
+    }
+    let _log_state = logs::init()?;
+    let backend = resolve_backend(&args).await?.1;
+    tui::run_approve(backend, name).await
+}
+
+async fn resolve_backend(args: &Args) -> Result<(String, Arc<dyn Backend>)> {
+    if args.demo {
+        let backend: Arc<dyn Backend> = Arc::new(DemoBackend::new());
+        Ok(("demo".into(), backend))
+    } else {
+        let session = auth::resolve().await?;
+        let backend: Arc<dyn Backend> = Arc::new(GcpBackend::new(session.credentials).await?);
+        Ok((session.account, backend))
+    }
+}
+
 async fn run_send(name: String, source: Option<String>) -> Result<()> {
-    if !ipc::is_valid_grant_name(&name) {
+    if !gcp::grants::is_valid_grant_name(&name) {
         bail!(
             "'{name}' is not a valid grant resource name; expected '<organizations|folders|projects>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>'"
         );
@@ -96,15 +126,7 @@ async fn run_send(name: String, source: Option<String>) -> Result<()> {
 
 async fn run_tui(args: Args) -> Result<()> {
     let log_state = logs::init()?;
-
-    let (account, backend): (String, Arc<dyn Backend>) = if args.demo {
-        ("demo".into(), Arc::new(DemoBackend::new()))
-    } else {
-        let session = auth::resolve().await?;
-        let backend = GcpBackend::new(session.credentials).await?;
-        (session.account, Arc::new(backend))
-    };
-
+    let (account, backend) = resolve_backend(&args).await?;
     let poll_interval = if args.demo {
         DEMO_POLL_INTERVAL
     } else {

@@ -11,9 +11,12 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
-use crate::ipc::{self, ApprovalEvent};
+use crate::backend::DynBackend;
+use crate::gcp::grants::parse_grant_name;
+use crate::ipc::ApprovalEvent;
 
 use super::Term;
+use super::approve::{self, ApproveOutcome};
 use super::widgets::format_age;
 
 /// What the queue screen decided to do on exit. `Back` re-enters browse;
@@ -43,7 +46,7 @@ pub fn new_queue() -> Queue {
 /// Enter the queue screen. Returns when the user presses Esc/q, when Ctrl-C
 /// is pressed (full TUI quit), or when the queue empties (e.g. all rows
 /// dropped).
-pub async fn run(term: &mut Term, queue: Queue) -> Result<QueueExit> {
+pub async fn run(term: &mut Term, backend: DynBackend, queue: Queue) -> Result<QueueExit> {
     let mut events = EventStream::new();
     let mut cursor = 0usize;
     // Periodic redraw so age timestamps tick and newly-arrived events appear
@@ -84,6 +87,20 @@ pub async fn run(term: &mut Term, queue: Queue) -> Result<QueueExit> {
                             q.remove(cursor);
                         }
                     }
+                    Some(QueueAction::Open) => {
+                        let name = snapshot[cursor].event.name.clone();
+                        match approve::run(term, backend.clone(), name).await? {
+                            ApproveOutcome::Quit => return Ok(QueueExit::Quit),
+                            outcome => {
+                                if should_drop(&outcome) {
+                                    let mut q = queue.lock().unwrap();
+                                    if cursor < q.len() {
+                                        q.remove(cursor);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Some(QueueAction::Back) => return Ok(QueueExit::Back),
                     Some(QueueAction::Quit) => return Ok(QueueExit::Quit),
                     None => {}
@@ -100,6 +117,7 @@ enum QueueAction {
     Top,
     Bottom,
     Drop,
+    Open,
     Back,
     Quit,
 }
@@ -115,9 +133,20 @@ fn decide(key: KeyEvent) -> Option<QueueAction> {
         KeyCode::Char('g') => Some(QueueAction::Top),
         KeyCode::Char('G') => Some(QueueAction::Bottom),
         KeyCode::Char('d') | KeyCode::Char('x') => Some(QueueAction::Drop),
+        KeyCode::Enter => Some(QueueAction::Open),
         KeyCode::Esc | KeyCode::Char('q') => Some(QueueAction::Back),
         _ => None,
     }
+}
+
+/// Should the row be removed from the queue after a modal session?
+/// Anything that reached PAM (approved, denied, already-handled by someone else) is
+/// done, canceled/failed leaves the row so the user can retry.
+fn should_drop(outcome: &ApproveOutcome) -> bool {
+    matches!(
+        outcome,
+        ApproveOutcome::Approved | ApproveOutcome::Denied | ApproveOutcome::AlreadyHandled
+    )
 }
 
 fn render(frame: &mut Frame, snapshot: &[QueuedEvent], cursor: usize) {
@@ -144,7 +173,7 @@ fn render(frame: &mut Frame, snapshot: &[QueuedEvent], cursor: usize) {
     let items: Vec<ListItem> = snapshot
         .iter()
         .map(|q| {
-            let (ent, scope_short, scope_id) = match ipc::parse_grant_name(&q.event.name) {
+            let (ent, scope_short, scope_id) = match parse_grant_name(&q.event.name) {
                 Some(p) => (p.entitlement, p.scope.short(), p.scope_id),
                 None => ("?", "?", "?"),
             };
@@ -171,7 +200,7 @@ fn render(frame: &mut Frame, snapshot: &[QueuedEvent], cursor: usize) {
     frame.render_stateful_widget(list, chunks[1], &mut state);
 
     let footer = Paragraph::new(Span::styled(
-        "j/k navigate | g/G top/bottom | d/x drop | esc/q back",
+        "j/k navigate | enter review | d/x drop | esc/q back | ctrl-c quit",
         dim,
     ));
     frame.render_widget(footer, chunks[2]);
