@@ -637,11 +637,7 @@ impl BrowseScreen {
             self.entitlements.len(),
             self.status,
         );
-        let unread = self
-            .log_state
-            .lock()
-            .map(|s| s.unread)
-            .unwrap_or(0);
+        let unread = self.log_state.lock().map(|s| s.unread).unwrap_or(0);
         let warn = if unread > 0 {
             format!("[{unread} warn] ")
         } else {
@@ -803,17 +799,15 @@ fn render_logs_popup(frame: &mut Frame, area: Rect, last: Option<&LogEntry>, log
 
     let dim = Style::default().add_modifier(Modifier::DIM);
     let body: Vec<Line> = match last {
-        None => vec![
-            Line::from(Span::styled(
-                "no warnings or errors recorded yet",
-                dim,
-            )),
-        ],
+        None => vec![Line::from(Span::styled(
+            "no warnings or errors recorded yet",
+            dim,
+        ))],
         Some(entry) => {
             let level_style = match entry.level {
-                tracing::Level::ERROR => Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                tracing::Level::ERROR => {
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                }
                 _ => Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -832,19 +826,13 @@ fn render_logs_popup(frame: &mut Frame, area: Rect, last: Option<&LogEntry>, log
             ]
         }
     };
-    frame.render_widget(
-        Paragraph::new(body).wrap(Wrap { trim: false }),
-        inner[0],
-    );
+    frame.render_widget(Paragraph::new(body).wrap(Wrap { trim: false }), inner[0]);
 
     let footer = vec![
         Line::from(Span::styled("full log:", dim)),
         Line::from(Span::raw(log_path.to_string())),
     ];
-    frame.render_widget(
-        Paragraph::new(footer).wrap(Wrap { trim: false }),
-        inner[1],
-    );
+    frame.render_widget(Paragraph::new(footer).wrap(Wrap { trim: false }), inner[1]);
 }
 
 fn upsert_in_place(rows: &mut Vec<EntitlementRow>, row: EntitlementRow) {

@@ -18,6 +18,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::backend::DynBackend;
 use crate::cache::{Cache, now_unix};
+use crate::ipc;
 use crate::logs::SharedLogState;
 use crate::poller::{PollMode, Poller};
 use crate::refresh::RefreshOptions;
@@ -61,6 +62,30 @@ async fn run_inner(
     // strip. Buffer is generous because pollers send aggressively and the
     // browse loop drains lazily (e.g. while inside the request modal).
     let (grant_tx, grant_rx) = mpsc::channel(256);
+
+    // Socket listener for forwarded approval events. `bind_or_skip` returns
+    // None (with a logged warning) when another gpam instance already owns
+    // the socket, so a second TUI still runs but without IPC. The cleanup
+    // guard unlinks the socket on the way out, even on panic.
+    let _socket_cleanup = match ipc::bind_or_skip(&ipc::socket_path()?)? {
+        Some((listener, cleanup)) => {
+            let (approval_tx, mut approval_rx) = mpsc::channel(64);
+            tokio::spawn(ipc::listen(listener, approval_tx));
+            // Until the queue UI lands the events surface as log lines.
+            // The L popup picks them up via the existing tracing layer.
+            tokio::spawn(async move {
+                while let Some(event) = approval_rx.recv().await {
+                    tracing::info!(
+                        "approval received via socket: {} (source: {})",
+                        event.name,
+                        event.source.as_deref().unwrap_or("-")
+                    );
+                }
+            });
+            Some(cleanup)
+        }
+        None => None,
+    };
 
     let poller = Poller {
         backend: backend.clone(),
