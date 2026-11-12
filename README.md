@@ -27,7 +27,7 @@ Pre-built binaries for Linux and macOS are on the [GitHub releases page](https:/
 
 ## Desktop GUI: `gpam-gui`
 
-![gpam-gui with the demo data: scope tree, entitlement list narrowed by a role, details and grants](docs/gui.png)
+![gpam-gui with the demo data: scope tree, entitlement list narrowed by a role, details and grants](demo/gpam-gui.png)
 
 ```
 cargo install gpam-gui

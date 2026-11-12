@@ -2,7 +2,7 @@
 
 Desktop UI for [Google Cloud Privileged Access Manager](https://docs.cloud.google.com/iam/docs/pam-overview). Browse the entitlements you can request, submit grants with a duration and justification, and watch them become active.
 
-![gpam-gui with the demo data: scope tree, entitlement list narrowed by a role, details and grants](https://raw.githubusercontent.com/michalskalski/gpam/main/docs/gui.png)
+![gpam-gui with the demo data: scope tree, entitlement list narrowed by a role, details and grants](https://raw.githubusercontent.com/michalskalski/gpam/main/demo/gpam-gui.png)
 
 It is keyboard driven, with the usual mouse support. The currently supported platforms are macOS and Linux.
 
