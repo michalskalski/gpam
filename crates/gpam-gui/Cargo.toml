@@ -1,0 +1,30 @@
+[package]
+name = "gpam-gui"
+version.workspace = true
+edition.workspace = true
+description = "Desktop UI for Google Cloud Privileged Access Manager"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["gcp", "pam", "gui", "iam", "privileged-access"]
+categories = ["gui"]
+
+[features]
+# Adds `--screenshot`, which arranges the demo data into a showcase and
+# saves a picture of the window. A development aid, not part of releases.
+screenshot = ["dep:png"]
+
+[dependencies]
+gpam-core.workspace = true
+
+tokio.workspace = true
+
+eframe.workspace = true
+egui_extras.workspace = true
+fontique.workspace = true
+png = { workspace = true, optional = true }
+
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true

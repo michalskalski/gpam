@@ -1,0 +1,122 @@
+mod tui;
+
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use anyhow::{Result, bail};
+use clap::{Parser, Subcommand};
+
+use gpam_core::poller::{DEFAULT_POLL_INTERVAL, DEMO_POLL_INTERVAL};
+use gpam_core::refresh::RefreshOptions;
+use gpam_core::{backend, cache, gcp, ipc, logs};
+
+/// Terminal UI for Google Cloud Privileged Access Manager.
+///
+/// Application Default Credentials must be available. If they aren't,
+/// run: gcloud auth application-default login
+#[derive(Debug, Parser)]
+#[command(name = "gpam", version, about, long_about = None)]
+struct Args {
+    /// Run with seeded fixtures instead of talking to GCP.
+    #[arg(long, global = true)]
+    demo: bool,
+    /// Skip project-scope entitlement discovery.
+    #[arg(long, global = true)]
+    no_projects: bool,
+    /// Skip folder-scope entitlement discovery.
+    #[arg(long, global = true)]
+    no_folders: bool,
+    /// Skip organization-scope entitlement discovery.
+    #[arg(long, global = true)]
+    no_orgs: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Forward a pending grant to a running gpam TUI via its local socket.
+    ///
+    /// Exits non-zero if no TUI is listening, so shell fallbacks compose
+    /// cleanly (e.g. `gpam send <name> || gpam approve <name>`).
+    Send {
+        /// Fully-qualified PAM grant resource name.
+        name: String,
+        /// Tag stored with the event (e.g. applescript, pubsub). Defaults to cli.
+        #[arg(long)]
+        source: Option<String>,
+    },
+    /// Open a one-shot approve modal in this terminal for a known grant.
+    ///
+    /// Use this when no TUI is running (e.g. as the `||` fallback after
+    /// `gpam send`). Does not touch the IPC socket.
+    Approve {
+        /// Fully-qualified PAM grant resource name.
+        name: String,
+    },
+}
+
+impl Args {
+    fn refresh_options(&self) -> RefreshOptions {
+        RefreshOptions {
+            projects: !self.no_projects,
+            folders: !self.no_folders,
+            organizations: !self.no_orgs,
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let mut args = Args::parse();
+    match args.command.take() {
+        Some(Command::Send { name, source }) => run_send(name, source).await,
+        Some(Command::Approve { name }) => run_approve(args, name).await,
+        None => run_tui(args).await,
+    }
+}
+
+async fn run_approve(args: Args, name: String) -> Result<()> {
+    if !gcp::grants::is_valid_grant_name(&name) {
+        bail!(
+            "'{name}' is not a valid grant resource name; expected '<organizations|folders|projects>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>'"
+        );
+    }
+    let _log_state = logs::init()?;
+    let backend = backend::resolve(args.demo).await?.1;
+    tui::run_approve(backend, name).await
+}
+
+async fn run_send(name: String, source: Option<String>) -> Result<()> {
+    if !gcp::grants::is_valid_grant_name(&name) {
+        bail!(
+            "'{name}' is not a valid grant resource name; expected '<organizations|folders|projects>/<id>/locations/<loc>/entitlements/<ent>/grants/<id>'"
+        );
+    }
+    let event = ipc::ApprovalEvent {
+        name,
+        source: source.or_else(|| Some("cli".into())),
+    };
+    ipc::send(&ipc::socket_path()?, &event).await
+}
+
+async fn run_tui(args: Args) -> Result<()> {
+    let log_state = logs::init()?;
+    let (account, backend) = backend::resolve(args.demo).await?;
+    let poll_interval = if args.demo {
+        DEMO_POLL_INTERVAL
+    } else {
+        DEFAULT_POLL_INTERVAL
+    };
+    let cache = Arc::new(Mutex::new(cache::Cache::open(&account)?));
+    tui::run(
+        account,
+        cache,
+        backend,
+        args.refresh_options(),
+        poll_interval,
+        log_state,
+    )
+    .await
+}

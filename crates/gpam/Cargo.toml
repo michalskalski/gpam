@@ -1,0 +1,24 @@
+[package]
+name = "gpam"
+version.workspace = true
+edition.workspace = true
+description = "Terminal UI for Google Cloud Privileged Access Manager"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["gcp", "pam", "tui", "iam", "privileged-access"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+gpam-core.workspace = true
+
+tokio.workspace = true
+futures.workspace = true
+
+ratatui.workspace = true
+crossterm.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
