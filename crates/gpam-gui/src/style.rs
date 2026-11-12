@@ -708,6 +708,39 @@ pub fn segmented(ui: &mut egui::Ui, options: &[&str], selected: Option<usize>) -
     clicked
 }
 
+/// Space between the blocks of a dialog.
+pub const DIALOG_GAP: f32 = 16.0;
+
+/// The frame of a dialog: a roomy rounded sheet.
+pub fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::popup(&ctx.global_style())
+        .inner_margin(egui::Margin::same(22))
+        .corner_radius(12.0)
+}
+
+/// Dialog title at the left, with the content of `right` at the far end of
+/// the same line.
+pub fn dialog_title(ui: &mut egui::Ui, title: &str, right: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(title).family(bold_family()).size(18.0));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), right);
+    });
+    ui.add_space(DIALOG_GAP);
+}
+
+/// A message on a tinted strip across a dialog.
+pub fn banner(ui: &mut egui::Ui, text: &str, tone: Tone) {
+    let (fg, bg) = Palette::current(ui).tone(tone);
+    egui::Frame::new()
+        .fill(bg)
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(egui::Label::new(RichText::new(text).color(fg)).wrap());
+        });
+}
+
 /// A soft filled box without an outline, for a block of related content
 /// inside a dialog.
 pub fn card(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {

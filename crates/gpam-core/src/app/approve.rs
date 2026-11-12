@@ -1,9 +1,9 @@
 use anyhow::Result;
 
 use crate::backend::DynBackend;
-use crate::gcp::grants::{GrantDetails, RoleBindingView};
+use crate::gcp::grants::GrantDetails;
 
-use super::format::format_age;
+use super::format::plain_text;
 use super::text_input::{EditAction, TextInput};
 
 /// How the approve modal ended. The caller (queue or CLI) uses this to
@@ -87,26 +87,6 @@ impl StepResult {
     }
 }
 
-/// Labelled single-value rows describing a grant for the confirm step:
-/// requester, scope, entitlement, duration and state.
-pub fn detail_fields(d: &GrantDetails) -> Vec<(&'static str, String)> {
-    vec![
-        ("requester", d.requester.clone()),
-        ("scope", format!("{}/{}", d.scope_type.plural(), d.scope_id)),
-        ("entitlement", d.entitlement_short_name.clone()),
-        ("duration", format_age(d.requested_duration_secs)),
-        ("state", d.state.to_string()),
-    ]
-}
-
-/// A role binding as one line, with its condition in parentheses.
-pub fn role_binding_label(rb: &RoleBindingView) -> String {
-    match &rb.condition {
-        Some(c) => format!("{}  ({})", rb.role, c),
-        None => rb.role.clone(),
-    }
-}
-
 /// Approve-modal intents. Each one is only meaningful in some steps and is
 /// ignored in the others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,11 +133,23 @@ impl ApproveModal {
     }
 
     pub fn from_fetch(fetched: Result<GrantDetails>) -> Self {
+        // The requester writes the justification, and other fields come
+        // from outside as well. They are made safe to show before any
+        // frontend sees them.
+        let fetched = fetched.map(|mut d| {
+            d.requester = plain_text(&d.requester);
+            d.justification = d.justification.as_deref().map(plain_text);
+            for rb in &mut d.role_bindings {
+                rb.role = plain_text(&rb.role);
+                rb.condition = rb.condition.as_deref().map(plain_text);
+            }
+            d
+        });
         let (step, details) = match fetched {
             Ok(d) if d.state.is_terminal() => (Step::Result(StepResult::AlreadyHandled), Some(d)),
             Ok(d) => (Step::Confirm, Some(d)),
             Err(e) => (
-                Step::Result(StepResult::Err(format!("fetch failed: {e:#}"))),
+                Step::Result(StepResult::Err(plain_text(&format!("fetch failed: {e:#}")))),
                 None,
             ),
         };
@@ -250,7 +242,7 @@ impl ApproveModal {
                 if already_handled {
                     Step::Result(StepResult::AlreadyHandled)
                 } else {
-                    Step::Result(StepResult::Err(format!("{e:#}")))
+                    Step::Result(StepResult::Err(plain_text(&format!("{e:#}"))))
                 }
             }
         };
@@ -329,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn result_and_detail_text() {
+    fn result_text() {
         assert_eq!(StepResult::Ok(Decision::Approve).tag(), "[approve]");
         assert_eq!(
             StepResult::Ok(Decision::Deny).message("ent-a"),
@@ -341,41 +333,28 @@ mod tests {
             "grant ent-a was already approved or denied by someone else."
         );
         assert_eq!(StepResult::Err("boom".into()).message("ent-a"), "boom");
+    }
 
-        let details = GrantDetails {
+    #[test]
+    fn fetched_details_are_made_safe_to_show() {
+        let modal = ApproveModal::from_fetch(Ok(GrantDetails {
             name: GRANT.into(),
-            state: GrantState::ApprovalAwaited,
+            state: crate::gcp::grants::GrantState::ApprovalAwaited,
             requester: "user@example.test".into(),
-            requested_duration_secs: 7200,
-            justification: None,
-            role_bindings: Vec::new(),
+            requested_duration_secs: 3600,
+            justification: Some("urgent\u{1b}[2J\npre-approved\u{202E}".into()),
+            role_bindings: vec![crate::gcp::grants::RoleBindingView {
+                role: "roles/viewer".into(),
+                condition: Some("a\u{7}b".into()),
+            }],
             scope_type: crate::gcp::Scope::Project,
             scope_id: "fake-proj-1".into(),
             entitlement_short_name: "ent-a".into(),
-        };
-        assert_eq!(
-            detail_fields(&details),
-            vec![
-                ("requester", "user@example.test".to_string()),
-                ("scope", "projects/fake-proj-1".to_string()),
-                ("entitlement", "ent-a".to_string()),
-                ("duration", "2h".to_string()),
-                ("state", "ApprovalAwaited".to_string()),
-            ]
-        );
-        let plain = RoleBindingView {
-            role: "roles/viewer".into(),
-            condition: None,
-        };
-        let conditional = RoleBindingView {
-            role: "roles/editor".into(),
-            condition: Some("request.time < x".into()),
-        };
-        assert_eq!(role_binding_label(&plain), "roles/viewer");
-        assert_eq!(
-            role_binding_label(&conditional),
-            "roles/editor  (request.time < x)"
-        );
+        }));
+        let d = modal.details().unwrap();
+        assert_eq!(d.justification.as_deref(), Some("urgent [2J pre-approved"));
+        assert_eq!(d.role_bindings[0].condition.as_deref(), Some("a b"));
+        assert_eq!(*modal.step(), Step::Confirm);
     }
 
     #[tokio::test]

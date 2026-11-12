@@ -11,14 +11,11 @@ use gpam_core::gcp::grants::MIN_DURATION_SECS;
 
 use crate::app::{Intent, RequestScreen, ids};
 use crate::style::{
-    ButtonKind, Palette, Tone, badge, bold, bold_family, card, key_button, scope_icon, segmented,
-    text_input,
+    ButtonKind, DIALOG_GAP, Palette, Tone, badge, banner, bold, bold_family, card, dialog_frame,
+    dialog_title, key_button, scope_icon, segmented, text_input,
 };
 
 const WIDTH: f32 = 440.0;
-
-/// Space between the blocks of the form.
-const BLOCK_GAP: f32 = 16.0;
 
 /// Durations offered as one-click choices. Those outside an entitlement's
 /// limits are left out.
@@ -28,12 +25,8 @@ const QUICK_DURATIONS: &[&str] = &["30m", "1h", "2h", "4h", "8h"];
 const MAX_STEP_DOTS: usize = 24;
 
 pub fn show(ctx: &egui::Context, screen: &mut RequestScreen, out: &mut Vec<Intent>) {
-    // The dialog is a roomy rounded sheet.
-    let frame = egui::Frame::popup(&ctx.global_style())
-        .inner_margin(egui::Margin::same(22))
-        .corner_radius(12.0);
     Modal::new(egui::Id::unique("gpam-request"))
-        .frame(frame)
+        .frame(dialog_frame(ctx))
         .show(ctx, |ui| {
             ui.set_width(WIDTH);
             if screen.summary {
@@ -44,19 +37,9 @@ pub fn show(ctx: &egui::Context, screen: &mut RequestScreen, out: &mut Vec<Inten
         });
 }
 
-/// Dialog title at the left, with the content of `right` at the far end of
-/// the same line.
-fn title_row(ui: &mut Ui, title: &str, right: impl FnOnce(&mut Ui)) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(title).family(bold_family()).size(18.0));
-        ui.with_layout(Layout::right_to_left(Align::Center), right);
-    });
-    ui.add_space(BLOCK_GAP);
-}
-
 fn prompt(ui: &mut Ui, flow: &mut RequestFlow, busy: bool, out: &mut Vec<Intent>) {
     let palette = Palette::current(ui);
-    title_row(ui, "Request access", |ui| {
+    dialog_title(ui, "Request access", |ui| {
         if flow.total() > 1 {
             ui.label(
                 RichText::new(format!("{} of {}", flow.position() + 1, flow.total()))
@@ -67,7 +50,7 @@ fn prompt(ui: &mut Ui, flow: &mut RequestFlow, busy: bool, out: &mut Vec<Intent>
     });
     if !flow.results().is_empty() {
         card(ui, |ui| results(ui, flow.results(), &palette));
-        ui.add_space(BLOCK_GAP);
+        ui.add_space(DIALOG_GAP);
     }
 
     let Some(modal) = flow.current() else {
@@ -80,7 +63,7 @@ fn prompt(ui: &mut Ui, flow: &mut RequestFlow, busy: bool, out: &mut Vec<Intent>
     let error = modal.error().map(str::to_owned);
 
     card(ui, |ui| entitlement_summary(ui, &ent, &palette));
-    ui.add_space(BLOCK_GAP);
+    ui.add_space(DIALOG_GAP);
 
     ui.add_enabled_ui(!busy, |ui| {
         // Duration: a field for any value, joined by the usual values as
@@ -114,7 +97,7 @@ fn prompt(ui: &mut Ui, flow: &mut RequestFlow, busy: bool, out: &mut Vec<Intent>
         };
         ui.add_space(2.0);
         ui.label(RichText::new(limits).small().color(palette.dim));
-        ui.add_space(BLOCK_GAP);
+        ui.add_space(DIALOG_GAP);
 
         if ent.justification_required {
             field_label(ui, "Justification", field == Field::Justification, &palette);
@@ -139,10 +122,10 @@ fn prompt(ui: &mut Ui, flow: &mut RequestFlow, busy: bool, out: &mut Vec<Intent>
     });
 
     if let Some(err) = error {
-        ui.add_space(BLOCK_GAP);
-        banner(ui, &err, Tone::Error, &palette);
+        ui.add_space(DIALOG_GAP);
+        banner(ui, &err, Tone::Error);
     }
-    ui.add_space(BLOCK_GAP + 4.0);
+    ui.add_space(DIALOG_GAP + 4.0);
 
     if busy {
         ui.horizontal(|ui| {
@@ -248,19 +231,6 @@ fn field_label(ui: &mut Ui, label: &str, focused: bool, palette: &Palette) {
     ui.add_space(4.0);
 }
 
-/// A message on a tinted strip across the dialog.
-fn banner(ui: &mut Ui, text: &str, tone: Tone, palette: &Palette) {
-    let (fg, bg) = palette.tone(tone);
-    egui::Frame::new()
-        .fill(bg)
-        .corner_radius(6)
-        .inner_margin(egui::Margin::symmetric(10, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.add(egui::Label::new(RichText::new(text).color(fg)).wrap());
-        });
-}
-
 /// One line per handled entitlement: outcome badge, name, then the grant
 /// ID or the error underneath.
 fn results(ui: &mut Ui, results: &[RequestResult], palette: &Palette) {
@@ -296,7 +266,7 @@ fn results(ui: &mut Ui, results: &[RequestResult], palette: &Palette) {
 fn summary(ui: &mut Ui, flow: &RequestFlow, out: &mut Vec<Intent>) {
     let palette = Palette::current(ui);
     let (ok, failed, skipped) = flow.counts();
-    title_row(ui, "Request summary", |ui| {
+    dialog_title(ui, "Request summary", |ui| {
         if skipped > 0 {
             badge(ui, &format!("{skipped} skipped"), Tone::Neutral);
         }
@@ -312,7 +282,7 @@ fn summary(ui: &mut Ui, flow: &RequestFlow, out: &mut Vec<Intent>) {
         .show(ui, |ui| {
             card(ui, |ui| results(ui, flow.results(), &palette));
         });
-    ui.add_space(BLOCK_GAP + 4.0);
+    ui.add_space(DIALOG_GAP + 4.0);
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if key_button(ui, "Continue", "enter", ButtonKind::Primary, true).clicked() {

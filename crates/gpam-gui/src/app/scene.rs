@@ -1,6 +1,9 @@
-//! A scripted demo scene for the README screenshot. With `--screenshot` the
-//! app arranges the demo data into a state that shows its main features,
-//! saves a picture of the window and exits.
+//! Scripted demo scenes. With `--screenshot` the app drives itself through
+//! one of them on the demo data, saves pictures of the window and exits.
+//!
+//! The browse scene arranges a state that shows the main features, for the
+//! README picture. The approve scene walks an approval from the queue to
+//! its result and saves a picture of every step, as a visual check.
 
 use std::fs::File;
 use std::io::BufWriter;
@@ -12,9 +15,47 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 use eframe::egui;
 use gpam_core::app::action::Action;
+use gpam_core::app::approval_queue::QueueAction;
+use gpam_core::app::approve::{ApproveAction, Decision, Step as ApproveStep};
 use gpam_core::app::request::RequestAction;
 
-use super::{GuiApp, Intent, View};
+use super::{ApproveScreen, GuiApp, Intent, View};
+
+/// Which scripted scene to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SceneKind {
+    /// The showcase for the README picture.
+    Browse,
+    /// An approval from the queue to its result. It waits for an event on
+    /// the approval socket, for example from `gpam send`.
+    Approve,
+}
+
+/// Where the approve scene is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Approval {
+    Load,
+    Event,
+    OpenQueue,
+    OpenItem,
+    Confirm,
+    Choose,
+    Submit,
+    Outcome,
+    Dismiss,
+    Back,
+    Close,
+}
+
+/// A picture to take once the window has drawn the state it should show.
+struct Snap {
+    path: PathBuf,
+    since: Instant,
+    requested: bool,
+}
+
+/// Reason typed into the approve dialog.
+const REASON: &str = "Matches the on-call ticket";
 
 /// Grants the scene requests: scope ID, entitlement, duration and
 /// justification. The first is auto-approved and becomes active. The second
@@ -74,18 +115,138 @@ impl Step {
 
 pub struct Scene {
     path: PathBuf,
+    kind: SceneKind,
     step: Step,
+    approval: Approval,
+    snap: Option<Snap>,
     since: Instant,
     saved: Arc<AtomicBool>,
 }
 
 impl Scene {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, kind: SceneKind) -> Self {
         Self {
             path,
+            kind,
             step: Step::Load,
+            approval: Approval::Load,
+            snap: None,
             since: Instant::now(),
             saved: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Queue a picture named after the scene path with `suffix` added, and
+    /// move the approve scene on to `next` once it is saved.
+    fn snap(&mut self, suffix: &str, next: Approval) {
+        let stem = self
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("gui");
+        self.snap = Some(Snap {
+            path: self.path.with_file_name(format!("{stem}-{suffix}.png")),
+            since: Instant::now(),
+            requested: false,
+        });
+        self.approve_go(next);
+    }
+
+    fn approve_go(&mut self, next: Approval) {
+        self.approval = next;
+        self.since = Instant::now();
+    }
+
+    /// Advance the approve scene. Each step acts, then a picture is taken
+    /// before the next step runs.
+    fn tick_approve(&mut self, app: &mut GuiApp, ctx: &egui::Context) {
+        if let Some(snap) = &mut self.snap {
+            // Give the window a few frames to draw the new state.
+            if !snap.requested {
+                if snap.since.elapsed() > Duration::from_millis(600) {
+                    snap.requested = true;
+                    let path = snap.path.clone();
+                    let saved = self.saved.clone();
+                    let repaint = ctx.clone();
+                    ctx.request_screenshot(move |image| {
+                        if let Err(err) = save_png(&path, &image) {
+                            eprintln!("screenshot scene: {err:#}");
+                        }
+                        saved.store(true, Ordering::Relaxed);
+                        repaint.request_repaint();
+                    });
+                }
+                return;
+            }
+            if !self.saved.swap(false, Ordering::Relaxed) {
+                return;
+            }
+            self.snap = None;
+            self.since = Instant::now();
+        }
+        let ready_step = match &app.view {
+            View::Queue(q) => match &q.approve {
+                Some(ApproveScreen::Ready(modal)) => Some(modal.step().clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        match self.approval {
+            Approval::Load => {
+                let state = &app.app.browse;
+                if !state.refresh_in_flight() && !state.entitlements().is_empty() {
+                    self.approve_go(Approval::Event);
+                }
+            }
+            Approval::Event => {
+                if app.app.browse.pending_approvals() > 0 {
+                    self.snap("badge", Approval::OpenQueue);
+                }
+            }
+            Approval::OpenQueue => {
+                app.apply(ctx, Intent::Browse(Action::OpenApprovalQueue));
+                self.snap("queue", Approval::OpenItem);
+            }
+            Approval::OpenItem => {
+                app.apply(ctx, Intent::Queue(QueueAction::Open));
+                self.approve_go(Approval::Confirm);
+            }
+            Approval::Confirm => {
+                if matches!(ready_step, Some(ApproveStep::Confirm)) {
+                    self.snap("confirm", Approval::Choose);
+                }
+            }
+            Approval::Choose => {
+                app.apply(
+                    ctx,
+                    Intent::Approve(ApproveAction::Choose(Decision::Approve)),
+                );
+                if let View::Queue(q) = &mut app.view
+                    && let Some(ApproveScreen::Ready(modal)) = &mut q.approve
+                {
+                    modal.set_reason(REASON);
+                }
+                self.snap("reason", Approval::Submit);
+            }
+            Approval::Submit => {
+                app.apply(ctx, Intent::Approve(ApproveAction::Submit));
+                self.approve_go(Approval::Outcome);
+            }
+            Approval::Outcome => {
+                if matches!(ready_step, Some(ApproveStep::Result(_))) {
+                    self.snap("result", Approval::Dismiss);
+                }
+            }
+            Approval::Dismiss => {
+                app.apply(ctx, Intent::Approve(ApproveAction::Dismiss));
+                self.approve_go(Approval::Back);
+            }
+            Approval::Back => {
+                if matches!(app.view, View::Browse) {
+                    self.snap("after", Approval::Close);
+                }
+            }
+            Approval::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
     }
 
@@ -100,8 +261,9 @@ impl Scene {
         if self.since.elapsed() > STEP_TIMEOUT {
             let state = &app.app.browse;
             eprintln!(
-                "screenshot scene: step {} timed out (grants: {:?}, status: {:?}, browse view: {})",
+                "screenshot scene: step {} / {:?} timed out (grants: {:?}, status: {:?}, browse view: {})",
                 self.step.name(),
+                self.approval,
                 state
                     .live_grants()
                     .map(|g| g.state.to_string())
@@ -110,6 +272,10 @@ impl Scene {
                 matches!(app.view, View::Browse),
             );
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if self.kind == SceneKind::Approve {
+            self.tick_approve(app, ctx);
             return;
         }
         match self.step {

@@ -1608,7 +1608,7 @@ fn grant_order(g: &GrantRow) -> (u8, i64) {
 }
 
 /// Words for the state badge of a grant.
-fn grant_state_label(state: &GrantState) -> String {
+pub fn grant_state_label(state: &GrantState) -> String {
     match state {
         GrantState::Active => "active".into(),
         GrantState::Requested => "requested".into(),

@@ -4,6 +4,8 @@
 
 #[cfg(feature = "screenshot")]
 mod scene;
+#[cfg(feature = "screenshot")]
+pub use scene::SceneKind;
 
 use std::collections::BTreeSet;
 use std::sync::mpsc;
@@ -361,8 +363,8 @@ impl GuiApp {
     /// Run the scripted demo scene and save a picture of the window to
     /// `path`.
     #[cfg(feature = "screenshot")]
-    pub fn with_screenshot(mut self, path: std::path::PathBuf) -> Self {
-        self.scene = Some(scene::Scene::new(path));
+    pub fn with_screenshot(mut self, path: std::path::PathBuf, kind: SceneKind) -> Self {
+        self.scene = Some(scene::Scene::new(path, kind));
         self
     }
 

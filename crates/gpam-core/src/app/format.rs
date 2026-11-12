@@ -25,9 +25,42 @@ pub fn truncate(s: &str, n: usize) -> String {
     }
 }
 
+/// Text from outside made safe to show: control characters, which include
+/// terminal escape sequences and line breaks, become spaces, and characters
+/// that reorder or hide text are dropped. Use it on anything another person
+/// wrote, such as a grant justification.
+pub fn plain_text(s: &str) -> String {
+    s.chars()
+        .filter(|c| !is_invisible_format(*c))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+/// Bidirectional overrides and isolates, zero-width characters and the byte
+/// order mark. They change how the text around them reads without showing.
+fn is_invisible_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_text_neutralises_control_and_reordering_characters() {
+        assert_eq!(plain_text("fix outage"), "fix outage");
+        // An escape sequence loses its escape and so its effect.
+        assert_eq!(plain_text("ok\u{1b}[2Jdone"), "ok [2Jdone");
+        assert_eq!(plain_text("line one\nline two\r\n"), "line one line two  ");
+        // A right-to-left override would show the text after it reversed.
+        assert_eq!(plain_text("user\u{202E}nimda"), "usernimda");
+        assert_eq!(plain_text("a\u{200B}b\u{FEFF}"), "ab");
+        // Ordinary non-ASCII text is kept.
+        assert_eq!(plain_text("zażółć 日本語"), "zażółć 日本語");
+    }
 
     #[test]
     fn format_age_units() {

@@ -1,47 +1,56 @@
 //! Approve modal for one forwarded grant: details, approve or deny with an
 //! optional reason, and the result.
 
-use eframe::egui::{self, Modal, RichText, TextEdit, Ui};
-use gpam_core::app::approve::{
-    ApproveAction, ApproveModal, Decision, Step, StepResult, detail_fields, role_binding_label,
-};
-use gpam_core::gcp::grants::GrantDetails;
+use eframe::egui::{self, Align, Layout, Modal, RichText, TextEdit, Ui};
+use gpam_core::app::approve::{ApproveAction, ApproveModal, Decision, Step, StepResult};
+use gpam_core::app::format::format_age;
+use gpam_core::gcp::grants::{GrantDetails, GrantState};
 
 use crate::app::{ApproveScreen, Intent, ids};
-use crate::style::{Palette, Tone, badge, bold_family};
+use crate::browse::grant_state_label;
+use crate::style::{
+    ButtonKind, DIALOG_GAP, Palette, Tone, badge, banner, bold, bold_family, card, dialog_frame,
+    dialog_title, key_button, scope_icon, text_input, text_row, value_row,
+};
 
-const WIDTH: f32 = 600.0;
+const WIDTH: f32 = 480.0;
 
 pub fn show(ctx: &egui::Context, screen: &mut ApproveScreen, out: &mut Vec<Intent>) {
-    Modal::new(egui::Id::unique("gpam-approve")).show(ctx, |ui| {
-        ui.set_width(WIDTH);
-        let palette = Palette::current(ui);
-        ui.label(
-            RichText::new("approve grant")
-                .color(palette.accent)
-                .family(bold_family()),
-        );
-        ui.separator();
-        match screen {
-            ApproveScreen::Loading(name) => {
-                ui.add(egui::Label::new(RichText::new(name.as_str()).monospace()).wrap());
-                ui.add_space(6.0);
-                ui.label(RichText::new("working: loading grant...").color(palette.dim));
-            }
-            ApproveScreen::Submitting { details, step } => {
-                if let Some(d) = details {
-                    grant_details(ui, d, &palette);
+    Modal::new(egui::Id::unique("gpam-approve"))
+        .frame(dialog_frame(ctx))
+        .show(ctx, |ui| {
+            ui.set_width(WIDTH);
+            let palette = Palette::current(ui);
+            match screen {
+                ApproveScreen::Loading(name) => {
+                    dialog_title(ui, "Review grant", |_| {});
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Loading the grant").color(palette.dim));
+                    });
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::Label::new(RichText::new(name.as_str()).small().color(palette.dim))
+                            .wrap(),
+                    );
                 }
-                ui.add_space(6.0);
-                let label = match step {
-                    Step::Reason(decision) => decision.label(),
-                    _ => "decision",
-                };
-                ui.label(RichText::new(format!("working: sending {label}...")).color(palette.dim));
+                ApproveScreen::Submitting { details, step } => {
+                    dialog_title(ui, "Review grant", |_| {});
+                    if let Some(d) = details {
+                        grant_details(ui, d, &palette);
+                    }
+                    let sending = match step {
+                        Step::Reason(Decision::Deny) => "Sending the denial",
+                        _ => "Sending the approval",
+                    };
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new(sending).color(palette.dim));
+                    });
+                }
+                ApproveScreen::Ready(modal) => ready(ui, modal, &palette, out),
             }
-            ApproveScreen::Ready(modal) => ready(ui, modal, &palette, out),
-        }
-    });
+        });
 }
 
 fn ready(ui: &mut Ui, modal: &mut ApproveModal, palette: &Palette, out: &mut Vec<Intent>) {
@@ -51,134 +60,153 @@ fn ready(ui: &mut Ui, modal: &mut ApproveModal, palette: &Palette, out: &mut Vec
         .map(|d| d.entitlement_short_name.clone())
         .unwrap_or_default();
     match &step {
-        Step::Confirm | Step::Reason(_) => {
+        Step::Confirm => {
+            let state = modal.details().map(|d| d.state.clone());
+            dialog_title(ui, "Review grant", |ui| {
+                if let Some(state) = state {
+                    let tone = if state == GrantState::ApprovalAwaited {
+                        Tone::Warn
+                    } else {
+                        Tone::Neutral
+                    };
+                    badge(ui, &grant_state_label(&state), tone);
+                }
+            });
             if let Some(d) = modal.details() {
-                ui.heading(format!("grant: {}", d.entitlement_short_name));
                 grant_details(ui, d, palette);
             }
-            ui.add_space(8.0);
-        }
-        Step::Result(_) => {
-            let title = if entitlement.is_empty() {
-                "result".to_string()
-            } else {
-                format!("grant: {entitlement}")
-            };
-            ui.heading(title);
-        }
-    }
-
-    match &step {
-        Step::Confirm => {
-            ui.horizontal(|ui| {
-                if ui.button("approve").clicked() {
+            ui.add_space(4.0);
+            buttons(ui, |ui| {
+                if key_button(ui, "Approve", "a", ButtonKind::Primary, true).clicked() {
                     out.push(Intent::Approve(ApproveAction::Choose(Decision::Approve)));
                 }
-                if ui.button("deny").clicked() {
+                if key_button(ui, "Deny", "d", ButtonKind::Secondary, true).clicked() {
                     out.push(Intent::Approve(ApproveAction::Choose(Decision::Deny)));
                 }
-                if ui.button("cancel").clicked() {
+                if key_button(ui, "Cancel", "esc", ButtonKind::Ghost, true).clicked() {
                     out.push(Intent::Approve(ApproveAction::Cancel));
                 }
             });
         }
         Step::Reason(decision) => {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!("reason ({}):", decision.label()))
-                        .color(palette.accent)
-                        .family(bold_family()),
-                );
-                let mut reason = modal.reason().as_str().to_owned();
-                let response = TextEdit::singleline(&mut reason)
-                    .id(ids::reason())
-                    .desired_width(f32::INFINITY)
-                    .show(ui)
-                    .response;
-                if response.changed() {
-                    modal.set_reason(&reason);
-                }
-            });
-            ui.label(
-                RichText::new("enter to confirm  |  esc to go back")
-                    .small()
-                    .color(palette.dim),
-            );
-            ui.horizontal(|ui| {
-                if ui.button(decision.label()).clicked() {
+            let (title, label, action) = match decision {
+                Decision::Approve => ("Approve grant", "Reason for approving", "Approve"),
+                Decision::Deny => ("Deny grant", "Reason for denying", "Deny"),
+            };
+            dialog_title(ui, title, |_| {});
+            if let Some(d) = modal.details() {
+                grant_details(ui, d, palette);
+            }
+            ui.label(bold(label).small().color(palette.accent));
+            ui.add_space(4.0);
+            let mut reason = modal.reason().as_str().to_owned();
+            let edit = TextEdit::singleline(&mut reason)
+                .id(ids::reason())
+                .hint_text("Optional")
+                .desired_width(f32::INFINITY);
+            if text_input(ui, edit, true).changed() {
+                modal.set_reason(&reason);
+            }
+            ui.add_space(DIALOG_GAP + 4.0);
+            buttons(ui, |ui| {
+                if key_button(ui, action, "enter", ButtonKind::Primary, true).clicked() {
                     out.push(Intent::Approve(ApproveAction::Submit));
                 }
-                if ui.button("back").clicked() {
+                if key_button(ui, "Back", "esc", ButtonKind::Secondary, true).clicked() {
                     out.push(Intent::Approve(ApproveAction::Back));
                 }
             });
         }
         Step::Result(result) => {
-            let tone = match result {
-                StepResult::Ok(_) => Tone::Ok,
-                StepResult::AlreadyHandled => Tone::Info,
-                StepResult::Err(_) => Tone::Error,
+            let (title, tone) = match result {
+                StepResult::Ok(Decision::Approve) => ("Grant approved", Tone::Ok),
+                StepResult::Ok(Decision::Deny) => ("Grant denied", Tone::Ok),
+                StepResult::AlreadyHandled => ("Already handled", Tone::Info),
+                StepResult::Err(_) => ("Something went wrong", Tone::Error),
             };
-            let text = match result {
-                StepResult::Ok(decision) => decision.past_tense(),
-                StepResult::AlreadyHandled => "already handled",
-                StepResult::Err(_) => "error",
+            dialog_title(ui, title, |_| {});
+            let message = match result {
+                StepResult::Ok(decision) => {
+                    format!("{entitlement} was {}.", decision.past_tense())
+                }
+                StepResult::AlreadyHandled => {
+                    format!("{entitlement} was already approved or denied by someone else.")
+                }
+                StepResult::Err(message) => message.clone(),
             };
-            badge(ui, text, tone);
-            let message = RichText::new(result.message(&entitlement));
-            let message = if matches!(result, StepResult::Err(_)) {
-                message.color(palette.error)
-            } else {
-                message
-            };
-            ui.add(egui::Label::new(message).wrap());
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("dismiss").clicked() {
+            banner(ui, &message, tone);
+            ui.add_space(DIALOG_GAP + 4.0);
+            buttons(ui, |ui| {
+                if key_button(ui, "Done", "enter", ButtonKind::Primary, true).clicked() {
                     out.push(Intent::Approve(ApproveAction::Dismiss));
                 }
-                ui.label(
-                    RichText::new("press enter / esc / q to dismiss")
-                        .small()
-                        .color(palette.dim),
-                );
             });
         }
     }
-
-    ui.add_space(4.0);
-    let keys = match step {
-        Step::Confirm => "a approve | d deny | esc cancel",
-        Step::Reason(_) => "enter confirm | esc back",
-        Step::Result(_) => "enter / esc / q dismiss",
-    };
-    ui.label(RichText::new(keys).small().color(palette.dim));
 }
 
+/// The dialog's buttons, at the right with the first one added last in
+/// reading order.
+fn buttons(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), add);
+    });
+}
+
+/// What is being asked for: the entitlement and its scope in a soft card,
+/// then who asks, for how long, which roles and why.
 fn grant_details(ui: &mut Ui, d: &GrantDetails, palette: &Palette) {
-    egui::Grid::new("approve-details")
-        .num_columns(2)
-        .spacing([16.0, 4.0])
-        .show(ui, |ui| {
-            for (label, value) in detail_fields(d) {
-                ui.label(RichText::new(label).color(palette.dim));
-                ui.add(egui::Label::new(value).wrap());
-                ui.end_row();
-            }
-            ui.label(RichText::new("roles").color(palette.dim));
-            ui.vertical(|ui| {
-                if d.role_bindings.is_empty() {
-                    ui.label("(none listed)");
-                }
-                for rb in &d.role_bindings {
-                    ui.add(
-                        egui::Label::new(RichText::new(role_binding_label(rb)).monospace()).wrap(),
-                    );
-                }
-            });
-            ui.end_row();
-            ui.label(RichText::new("justify").color(palette.dim));
-            ui.add(egui::Label::new(d.justification.as_deref().unwrap_or("(none)")).wrap());
-            ui.end_row();
+    card(ui, |ui| {
+        ui.add(
+            egui::Label::new(
+                RichText::new(&d.entitlement_short_name)
+                    .family(bold_family())
+                    .size(15.0),
+            )
+            .truncate(),
+        );
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            scope_icon(ui, d.scope_type, palette.dim);
+            let scope = format!("{}/{}", d.scope_type.plural(), d.scope_id);
+            ui.add(egui::Label::new(RichText::new(scope).color(palette.dim)).truncate());
         });
+    });
+    ui.add_space(DIALOG_GAP);
+    value_row(ui, "Requester", palette, |ui| {
+        ui.add(egui::Label::new(&d.requester).truncate());
+    });
+    ui.separator();
+    value_row(ui, "Duration", palette, |ui| {
+        ui.label(format_age(d.requested_duration_secs));
+    });
+    ui.separator();
+    text_row(ui, "Roles", palette, |ui| {
+        if d.role_bindings.is_empty() {
+            ui.label(RichText::new("none listed").color(palette.dim));
+        }
+        for rb in &d.role_bindings {
+            // Full role names. This is where precision matters.
+            ui.add(egui::Label::new(&rb.role).wrap());
+            if let Some(condition) = &rb.condition {
+                ui.add(
+                    egui::Label::new(RichText::new(condition).small().color(palette.dim)).wrap(),
+                );
+            }
+        }
+    });
+    ui.separator();
+    text_row(ui, "Justification", palette, |ui| {
+        match d.justification.as_deref().filter(|s| !s.is_empty()) {
+            Some(why) => ui.add(egui::Label::new(why).wrap()),
+            None => ui.label(RichText::new("none").color(palette.dim)),
+        };
+    });
+    ui.separator();
+    // The full resource name, to match against the request you were told
+    // about.
+    text_row(ui, "Grant", palette, |ui| {
+        ui.add(egui::Label::new(RichText::new(&d.name).small()).wrap());
+    });
+    ui.add_space(DIALOG_GAP);
 }

@@ -101,7 +101,7 @@ fn render_header(frame: &mut Frame, area: Rect) {
 
 fn render_body(frame: &mut Frame, modal: &ApproveModal, parent: Rect) {
     let w = (parent.width as f32 * 0.8) as u16;
-    let h = 20u16.min(parent.height.saturating_sub(2));
+    let h = 24u16.min(parent.height.saturating_sub(2));
     let x = parent.x + (parent.width.saturating_sub(w)) / 2;
     let y = parent.y + (parent.height.saturating_sub(h)) / 2;
     let area = Rect {
@@ -166,6 +166,11 @@ fn render_confirm(frame: &mut Frame, modal: &ApproveModal, area: Rect, decision:
     let just = d.justification.as_deref().unwrap_or("(none)");
     lines.push(Line::from(vec![Span::styled("  justify:    ", dim)]));
     lines.push(Line::from(format!("    {just}")));
+
+    // The full resource name, to match against the request you were told
+    // about.
+    lines.push(Line::from(vec![Span::styled("  grant:      ", dim)]));
+    lines.push(Line::from(format!("    {}", d.name)));
 
     lines.push(Line::from(""));
     match decision {

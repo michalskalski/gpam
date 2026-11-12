@@ -49,6 +49,10 @@ struct Args {
     #[cfg(feature = "screenshot")]
     #[arg(long, value_name = "PATH", requires = "demo")]
     screenshot: Option<std::path::PathBuf>,
+    /// Which scripted scene `--screenshot` runs.
+    #[cfg(feature = "screenshot")]
+    #[arg(long, value_enum, default_value_t = app::SceneKind::Browse, requires = "screenshot")]
+    scene: app::SceneKind,
 }
 
 impl Args {
@@ -114,7 +118,7 @@ fn main() -> Result<()> {
     };
     let handle = runtime.handle().clone();
     #[cfg(feature = "screenshot")]
-    let screenshot = args.screenshot.clone();
+    let (screenshot, scene) = (args.screenshot.clone(), args.scene);
     eframe::run_native(
         "gpam",
         options,
@@ -123,7 +127,7 @@ fn main() -> Result<()> {
             let gui = app::GuiApp::new(app, handle);
             #[cfg(feature = "screenshot")]
             let gui = match screenshot {
-                Some(path) => gui.with_screenshot(path),
+                Some(path) => gui.with_screenshot(path, scene),
                 None => gui,
             };
             Ok(Box::new(gui))
