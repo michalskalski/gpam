@@ -123,6 +123,12 @@ impl QueueView {
         self.cursor
     }
 
+    /// Move the cursor to `pos`, clamped to the rows of the last
+    /// [`QueueView::sync`]. Used for pointer selection.
+    pub fn set_cursor(&mut self, pos: usize) {
+        self.cursor = pos.min(self.snapshot.len().saturating_sub(1));
+    }
+
     pub fn apply(&mut self, action: QueueAction) -> QueueStep {
         match action {
             QueueAction::Up => self.cursor = self.cursor.saturating_sub(1),
@@ -212,6 +218,19 @@ mod tests {
             view.rows()[0].display_parts(),
             ("ent-a", "proj", "fake-proj-1")
         );
+    }
+
+    #[test]
+    fn set_cursor_clamps_to_snapshot() {
+        let mut view = QueueView::new(queue_with(&[GRANT_A, GRANT_B]));
+        view.sync();
+        view.set_cursor(1);
+        assert_eq!(
+            view.apply(QueueAction::Open),
+            QueueStep::Open(GRANT_B.into())
+        );
+        view.set_cursor(7);
+        assert_eq!(view.cursor(), 1);
     }
 
     #[test]

@@ -1,16 +1,16 @@
 [workspace]
 resolver = "3"
-members = ["crates/gpam-core", "crates/gpam"]
+members = ["crates/gpam-core", "crates/gpam", "crates/gpam-gui"]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/michalskalski/gpam"
 homepage = "https://github.com/michalskalski/gpam"
 
 [workspace.dependencies]
-gpam-core = { path = "crates/gpam-core", version = "0.1.1" }
+gpam-core = { path = "crates/gpam-core", version = "=0.2.0" }
 
 google-cloud-privilegedaccessmanager-v1 = "1"
 google-cloud-resourcemanager-v3 = "1"
@@ -24,6 +24,11 @@ async-trait = "0.1"
 
 ratatui = "0.30"
 crossterm = { version = "0.29", features = ["event-stream"] }
+
+eframe = { version = "0.37", default-features = false, features = ["glow", "x11", "wayland", "clipboard", "default_fonts", "system_fonts"] }
+egui_extras = { version = "0.37", default-features = false }
+png = "0.18"
+fontique = { version = "0.11.1", default-features = false, features = ["system", "fontconfig-dlopen"] }
 
 rusqlite = { version = "0.32", features = ["bundled"] }
 nucleo-matcher = "0.3"

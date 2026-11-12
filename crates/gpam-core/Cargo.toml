@@ -6,7 +6,7 @@ description = "Frontend-agnostic core of gpam: Google Cloud Privileged Access Ma
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme = "../../README.md"
+readme = "README.md"
 keywords = ["gcp", "pam", "iam", "privileged-access"]
 categories = ["api-bindings"]
 

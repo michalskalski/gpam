@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS projects (
   project_id   TEXT PRIMARY KEY,
   display_name TEXT,
+  parent       TEXT,
   state        TEXT,
   fetched_at   INTEGER NOT NULL
 );

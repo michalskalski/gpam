@@ -6,7 +6,7 @@ description = "Terminal UI for Google Cloud Privileged Access Manager"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme = "../../README.md"
+readme = "README.md"
 keywords = ["gcp", "pam", "tui", "iam", "privileged-access"]
 categories = ["command-line-utilities"]
 

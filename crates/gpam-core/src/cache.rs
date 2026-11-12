@@ -14,7 +14,7 @@ use crate::gcp::grants::GrantState;
 /// Schema version for the cache-only tables (projects, folders, organizations,
 /// entitlements). Bumping this drops and recreates those tables.
 /// The next refresh repopulates them.
-const CACHE_SCHEMA_VERSION: i64 = 1;
+const CACHE_SCHEMA_VERSION: i64 = 2;
 
 /// Highest applied migration in [`STATE_MIGRATIONS`]. Bumping this is a real
 /// migration.
@@ -146,6 +146,9 @@ pub struct EntitlementRow {
 pub struct ProjectRow {
     pub project_id: String,
     pub display_name: Option<String>,
+    /// Resource name of the folder or organization the project sits in,
+    /// such as `folders/123`.
+    pub parent: Option<String>,
     pub state: Option<String>,
     pub fetched_at: i64,
 }
@@ -163,6 +166,17 @@ pub struct OrganizationRow {
     pub org_id: String,
     pub display_name: Option<String>,
     pub fetched_at: i64,
+}
+
+/// One organization, folder or project with its place in the hierarchy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeRow {
+    pub scope: Scope,
+    pub id: String,
+    pub display_name: Option<String>,
+    /// Resource name of the parent, such as `organizations/9`. Organizations
+    /// have none.
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,13 +299,20 @@ impl Cache {
 
     pub fn upsert_project(&self, row: &ProjectRow) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO projects(project_id, display_name, state, fetched_at)
-             VALUES (?1,?2,?3,?4)
+            "INSERT INTO projects(project_id, display_name, parent, state, fetched_at)
+             VALUES (?1,?2,?3,?4,?5)
              ON CONFLICT(project_id) DO UPDATE SET
                 display_name=excluded.display_name,
+                parent=excluded.parent,
                 state=excluded.state,
                 fetched_at=excluded.fetched_at",
-            params![row.project_id, row.display_name, row.state, row.fetched_at],
+            params![
+                row.project_id,
+                row.display_name,
+                row.parent,
+                row.state,
+                row.fetched_at
+            ],
         )?;
         Ok(())
     }
@@ -319,6 +340,39 @@ impl Cache {
             params![row.org_id, row.display_name, row.fetched_at],
         )?;
         Ok(())
+    }
+
+    /// Every cached organization, folder and project with its parent.
+    pub fn list_scopes(&self) -> Result<Vec<ScopeRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT 'organization' AS scope_type, org_id AS id, display_name, NULL AS parent
+               FROM organizations
+             UNION ALL
+             SELECT 'folder' AS scope_type, folder_id AS id, display_name, parent FROM folders
+             UNION ALL
+             SELECT 'project' AS scope_type, project_id AS id, display_name, parent FROM projects",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let scope_str: String = r.get("scope_type")?;
+            let scope = Scope::from_str(&scope_str).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::other(e.to_string())),
+                )
+            })?;
+            Ok(ScopeRow {
+                scope,
+                id: r.get("id")?,
+                display_name: r.get("display_name")?,
+                parent: r.get("parent")?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     /// Most-recently-used first. Never-used entitlements fall to the bottom,

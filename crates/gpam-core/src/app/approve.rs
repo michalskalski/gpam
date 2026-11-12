@@ -1,8 +1,9 @@
 use anyhow::Result;
 
 use crate::backend::DynBackend;
-use crate::gcp::grants::GrantDetails;
+use crate::gcp::grants::{GrantDetails, RoleBindingView};
 
+use super::format::format_age;
 use super::text_input::{EditAction, TextInput};
 
 /// How the approve modal ended. The caller (queue or CLI) uses this to
@@ -34,6 +35,14 @@ impl Decision {
             Decision::Deny => "deny",
         }
     }
+
+    /// `approved` or `denied`.
+    pub fn past_tense(self) -> &'static str {
+        match self {
+            Decision::Approve => "approved",
+            Decision::Deny => "denied",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +61,50 @@ pub enum StepResult {
     Ok(Decision),
     AlreadyHandled,
     Err(String),
+}
+
+impl StepResult {
+    /// Bracketed headline tag, for example `[approve]` or `[err]`.
+    pub fn tag(&self) -> String {
+        match self {
+            StepResult::Ok(decision) => format!("[{}]", decision.label()),
+            StepResult::AlreadyHandled => "[already handled]".into(),
+            StepResult::Err(_) => "[err]".into(),
+        }
+    }
+
+    /// Sentence describing the result for the grant of `entitlement`.
+    pub fn message(&self, entitlement: &str) -> String {
+        match self {
+            StepResult::Ok(decision) => {
+                format!("grant {entitlement} {}.", decision.past_tense())
+            }
+            StepResult::AlreadyHandled => {
+                format!("grant {entitlement} was already approved or denied by someone else.")
+            }
+            StepResult::Err(msg) => msg.clone(),
+        }
+    }
+}
+
+/// Labelled single-value rows describing a grant for the confirm step:
+/// requester, scope, entitlement, duration and state.
+pub fn detail_fields(d: &GrantDetails) -> Vec<(&'static str, String)> {
+    vec![
+        ("requester", d.requester.clone()),
+        ("scope", format!("{}/{}", d.scope_type.plural(), d.scope_id)),
+        ("entitlement", d.entitlement_short_name.clone()),
+        ("duration", format_age(d.requested_duration_secs)),
+        ("state", d.state.to_string()),
+    ]
+}
+
+/// A role binding as one line, with its condition in parentheses.
+pub fn role_binding_label(rb: &RoleBindingView) -> String {
+    match &rb.condition {
+        Some(c) => format!("{}  ({})", rb.role, c),
+        None => rb.role.clone(),
+    }
 }
 
 /// Approve-modal intents. Each one is only meaningful in some steps and is
@@ -125,6 +178,14 @@ impl ApproveModal {
 
     pub fn reason(&self) -> &TextInput {
         &self.reason
+    }
+
+    /// Replace the whole reason, for frontends with a native text field.
+    /// Like typing, it only has an effect in [`Step::Reason`].
+    pub fn set_reason(&mut self, text: &str) {
+        if matches!(self.step, Step::Reason(_)) {
+            self.reason.set_text(text);
+        }
     }
 
     pub fn apply(&mut self, action: ApproveAction) -> ApproveStep {
@@ -251,6 +312,69 @@ mod tests {
         assert_eq!(
             modal.apply(ApproveAction::Cancel),
             ApproveStep::Close(ApproveOutcome::Canceled)
+        );
+    }
+
+    #[tokio::test]
+    async fn set_reason_only_applies_while_collecting_a_reason() {
+        let backend = backend();
+        let mut modal = ApproveModal::load(&backend, GRANT).await;
+        modal.set_reason("too early");
+        assert!(modal.reason().is_empty());
+        modal.apply(ApproveAction::Choose(Decision::Deny));
+        modal.set_reason("not on call");
+        assert_eq!(modal.reason().as_str(), "not on call");
+        modal.apply(ApproveAction::Edit(EditAction::Insert('!')));
+        assert_eq!(modal.reason().as_str(), "not on call!");
+    }
+
+    #[test]
+    fn result_and_detail_text() {
+        assert_eq!(StepResult::Ok(Decision::Approve).tag(), "[approve]");
+        assert_eq!(
+            StepResult::Ok(Decision::Deny).message("ent-a"),
+            "grant ent-a denied."
+        );
+        assert_eq!(StepResult::AlreadyHandled.tag(), "[already handled]");
+        assert_eq!(
+            StepResult::AlreadyHandled.message("ent-a"),
+            "grant ent-a was already approved or denied by someone else."
+        );
+        assert_eq!(StepResult::Err("boom".into()).message("ent-a"), "boom");
+
+        let details = GrantDetails {
+            name: GRANT.into(),
+            state: GrantState::ApprovalAwaited,
+            requester: "user@example.test".into(),
+            requested_duration_secs: 7200,
+            justification: None,
+            role_bindings: Vec::new(),
+            scope_type: crate::gcp::Scope::Project,
+            scope_id: "fake-proj-1".into(),
+            entitlement_short_name: "ent-a".into(),
+        };
+        assert_eq!(
+            detail_fields(&details),
+            vec![
+                ("requester", "user@example.test".to_string()),
+                ("scope", "projects/fake-proj-1".to_string()),
+                ("entitlement", "ent-a".to_string()),
+                ("duration", "2h".to_string()),
+                ("state", "ApprovalAwaited".to_string()),
+            ]
+        );
+        let plain = RoleBindingView {
+            role: "roles/viewer".into(),
+            condition: None,
+        };
+        let conditional = RoleBindingView {
+            role: "roles/editor".into(),
+            condition: Some("request.time < x".into()),
+        };
+        assert_eq!(role_binding_label(&plain), "roles/viewer");
+        assert_eq!(
+            role_binding_label(&conditional),
+            "roles/editor  (request.time < x)"
         );
     }
 

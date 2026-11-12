@@ -63,6 +63,15 @@ pub enum ResultState {
 }
 
 impl RequestResult {
+    /// Bracketed outcome tag: `[ok]`, `[err]` or `[skip]`.
+    pub fn tag(&self) -> &'static str {
+        match self.state {
+            ResultState::Ok(_) => "[ok]",
+            ResultState::Err(_) => "[err]",
+            ResultState::Skipped => "[skip]",
+        }
+    }
+
     fn ok(short: String, grant: String) -> Self {
         Self {
             short_name: short,
@@ -305,6 +314,38 @@ impl RequestFlow {
 
     pub fn results(&self) -> &[RequestResult] {
         &self.results
+    }
+
+    /// Heading while prompting, for example `requesting access -- 2 of 3`.
+    pub fn progress_label(&self) -> String {
+        format!(
+            "requesting access -- {} of {}",
+            self.index + 1,
+            self.entitlements.len()
+        )
+    }
+
+    /// Heading for the closing summary, for example
+    /// `request summary -- 1 ok, 1 error, 0 skipped`.
+    pub fn summary_label(&self) -> String {
+        let (ok, err, skip) = self.counts();
+        format!("request summary -- {ok} ok, {err} error, {skip} skipped")
+    }
+
+    /// Replace the duration text of the current entitlement, for frontends
+    /// with a native text field. Same effect as typing it.
+    pub fn set_duration(&mut self, text: &str) {
+        if let Some(modal) = self.modal.as_mut() {
+            modal.duration.set_text(text);
+        }
+    }
+
+    /// Replace the justification text of the current entitlement, for
+    /// frontends with a native text field. Same effect as typing it.
+    pub fn set_justification(&mut self, text: &str) {
+        if let Some(modal) = self.modal.as_mut() {
+            modal.justification.set_text(text);
+        }
     }
 
     pub fn has_errors(&self) -> bool {
@@ -552,6 +593,45 @@ mod tests {
         assert_eq!(flow.counts(), (1, 1, 1));
         assert!(flow.has_errors());
         assert_eq!(flow.grant_names(), vec!["g-1".to_string()]);
+    }
+
+    #[test]
+    fn setters_replace_text_and_labels_follow_progress() {
+        let mut flow = RequestFlow::new(vec![
+            ent("first", Some(4 * 3600), true),
+            ent("second", None, false),
+        ]);
+        assert_eq!(flow.progress_label(), "requesting access -- 1 of 2");
+        flow.set_duration("2h");
+        flow.set_justification("incident 42");
+        let modal = flow.current().unwrap();
+        assert_eq!(modal.duration().as_str(), "2h");
+        assert_eq!(modal.justification().as_str(), "incident 42");
+
+        // Typing after a set continues at the end of the text.
+        flow.apply(RequestAction::Edit(EditAction::Insert('0')));
+        assert_eq!(flow.current().unwrap().duration().as_str(), "2h0");
+        flow.set_duration("2h");
+
+        flow.apply(RequestAction::Confirm);
+        let RequestStep::Submit(sub) = flow.apply(RequestAction::Confirm) else {
+            panic!("expected a submission");
+        };
+        assert_eq!(sub.duration_secs, 2 * 3600);
+        assert_eq!(sub.justification.as_deref(), Some("incident 42"));
+        flow.complete(RequestResult::ok("first".into(), "g-1".into()));
+        assert_eq!(flow.progress_label(), "requesting access -- 2 of 2");
+        flow.apply(RequestAction::Skip);
+
+        assert!(flow.current().is_none());
+        flow.set_duration("ignored");
+        assert_eq!(
+            flow.summary_label(),
+            "request summary -- 1 ok, 0 error, 1 skipped"
+        );
+        let tags: Vec<_> = flow.results().iter().map(RequestResult::tag).collect();
+        assert_eq!(tags, ["[ok]", "[skip]"]);
+        assert_eq!(RequestResult::err("x".into(), "boom".into()).tag(), "[err]");
     }
 
     #[test]

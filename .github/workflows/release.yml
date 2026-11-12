@@ -76,9 +76,9 @@ jobs:
       - name: Build
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --locked --release --target ${{ matrix.target }}
+            cross build --locked --release -p gpam --target ${{ matrix.target }}
           else
-            cargo build --locked --release --target ${{ matrix.target }}
+            cargo build --locked --release -p gpam --target ${{ matrix.target }}
           fi
         shell: bash
 

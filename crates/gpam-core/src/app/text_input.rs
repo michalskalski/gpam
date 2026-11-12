@@ -45,6 +45,13 @@ impl TextInput {
         self.cursor = 0;
     }
 
+    /// Replace the whole text and put the cursor at the end.
+    pub fn set_text(&mut self, s: &str) {
+        self.buf.clear();
+        self.buf.push_str(s);
+        self.cursor = self.buf.len();
+    }
+
     pub fn apply(&mut self, edit: EditAction) {
         match edit {
             EditAction::Insert(c) => self.insert(c),
@@ -166,6 +173,17 @@ mod tests {
         assert_eq!(t.as_str(), "");
         t.delete_word_back();
         assert_eq!(t.as_str(), "");
+    }
+
+    #[test]
+    fn set_text_replaces_and_moves_cursor_to_end() {
+        let mut t = TextInput::with_text("old");
+        t.move_home();
+        t.set_text("new text");
+        assert_eq!(t.as_str(), "new text");
+        assert_eq!(t.cursor(), "new text".len());
+        t.insert('!');
+        assert_eq!(t.as_str(), "new text!");
     }
 
     #[test]

@@ -326,6 +326,31 @@ pub fn parse_grant_name(s: &str) -> Option<GrantNameParts<'_>> {
     })
 }
 
+/// Cloud console address of the approval page for one grant, for sharing
+/// with approvers. `None` when the name is not a grant resource name.
+pub fn approval_console_url(grant_name: &str) -> Option<String> {
+    let parts = parse_grant_name(grant_name)?;
+    // The console selects the resource the page opens in with a query
+    // parameter named after the kind of resource.
+    let selector = match parts.scope {
+        Scope::Project => "project",
+        Scope::Folder => "folder",
+        Scope::Organization => "organizationId",
+    };
+    let mut grant_id = String::new();
+    for byte in grant_name.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            grant_id.push(char::from(byte));
+        } else {
+            grant_id.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Some(format!(
+        "https://console.cloud.google.com/iam-admin/pam/grants/approvals;grantId={grant_id};action=grant_approval?{selector}={}",
+        parts.scope_id
+    ))
+}
+
 /// Shape check for a fully-qualified PAM grant resource name.
 pub fn is_valid_grant_name(s: &str) -> bool {
     parse_grant_name(s).is_some()
@@ -458,6 +483,32 @@ mod tests {
         assert_eq!(p.scope, Scope::Project);
         assert_eq!(p.scope_id, "p123");
         assert_eq!(p.entitlement, "my-ent");
+    }
+
+    #[test]
+    fn approval_console_url_encodes_the_grant_name() {
+        assert_eq!(
+            approval_console_url(
+                "projects/123456/locations/global/entitlements/my-ent/grants/uuid-abc"
+            )
+            .as_deref(),
+            Some(
+                "https://console.cloud.google.com/iam-admin/pam/grants/approvals;\
+                 grantId=projects%2F123456%2Flocations%2Fglobal%2Fentitlements%2Fmy-ent%2Fgrants%2Fuuid-abc;\
+                 action=grant_approval?project=123456"
+            )
+        );
+        let folder = approval_console_url(
+            "folders/111111/locations/global/entitlements/my-ent/grants/uuid-abc",
+        )
+        .unwrap();
+        assert!(folder.ends_with("?folder=111111"));
+        let org = approval_console_url(
+            "organizations/222222/locations/global/entitlements/my-ent/grants/uuid-abc",
+        )
+        .unwrap();
+        assert!(org.ends_with("?organizationId=222222"));
+        assert_eq!(approval_console_url("not a grant"), None);
     }
 
     #[test]

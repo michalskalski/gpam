@@ -8,7 +8,9 @@ pub mod approval_queue;
 pub mod approve;
 pub mod browse;
 pub mod format;
+pub mod help;
 pub mod request;
+pub mod scope_tree;
 pub mod text_input;
 
 use std::sync::Arc;

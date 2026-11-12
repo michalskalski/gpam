@@ -227,7 +227,7 @@ fn render_result(frame: &mut Frame, modal: &ApproveModal, area: Rect, r: &StepRe
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(format!("grant {entitlement} {}d.", decision.label())),
+                Span::raw(format!("grant {entitlement} {}.", decision.past_tense())),
             ]));
         }
         StepResult::AlreadyHandled => {

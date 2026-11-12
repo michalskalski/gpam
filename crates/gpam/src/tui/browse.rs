@@ -31,6 +31,7 @@ pub async fn run(term: &mut Term, state: &mut BrowseState) -> Result<BrowseExit>
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
+        state.expire_status(now_unix());
         term.draw(|f| render(f, state))?;
 
         tokio::select! {
@@ -185,10 +186,18 @@ fn render_list(frame: &mut Frame, state: &BrowseState, area: Rect) {
     } else {
         "entitlements"
     };
-    let title = if focused {
-        format!(" {label}* ")
+    // With rows marked, Enter requests those and not the row under the
+    // cursor, so the title says it.
+    let marked = state.marked_count();
+    let enter = if marked > 0 {
+        format!("- enter requests {marked} marked ")
     } else {
-        format!(" {label} ")
+        String::new()
+    };
+    let title = if focused {
+        format!(" {label}* {enter}")
+    } else {
+        format!(" {label} {enter}")
     };
     let border = if focused {
         Style::default()
@@ -317,7 +326,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         ("^d / ^u", "move 10"),
         ("g / G", "top / bottom"),
         ("space", "toggle select"),
-        ("enter", "request selected"),
+        ("enter", "request marked, else current"),
         ("esc", "clear filter, then selection"),
         ("/", "focus search"),
         ("f", "cycle scope filter"),

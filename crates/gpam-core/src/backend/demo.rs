@@ -25,6 +25,11 @@ pub struct DemoBackend {
     grants: Mutex<DemoGrants>,
 }
 
+/// Polls a grant that needs approval stays pending before the demo approves
+/// it. At the demo poll interval this is about two minutes, long enough to
+/// see and try the pending state.
+const MANUAL_APPROVAL_POLLS: u32 = 150;
+
 #[derive(Default)]
 struct DemoGrants {
     next_id: u64,
@@ -35,7 +40,8 @@ struct DemoGrant {
     state: GrantState,
     poll_count: u32,
     /// `true` when the source entitlement has no approvers. The demo state
-    /// machine activates these on the first poll and manual ones take longer.
+    /// machine activates these on the first poll. Manual ones wait for
+    /// [`MANUAL_APPROVAL_POLLS`].
     auto: bool,
 }
 
@@ -47,18 +53,28 @@ impl DemoBackend {
             ProjectRow {
                 project_id: "acme-prod-platform".into(),
                 display_name: Some("Acme Production Platform".into()),
+                parent: Some("folders/200000002".into()),
                 state: Some("Active".into()),
                 fetched_at: now,
             },
             ProjectRow {
                 project_id: "acme-staging".into(),
                 display_name: Some("Acme Staging".into()),
+                parent: Some("folders/200000002".into()),
                 state: Some("Active".into()),
                 fetched_at: now,
             },
             ProjectRow {
                 project_id: "acme-data-warehouse".into(),
                 display_name: Some("Data Warehouse".into()),
+                parent: Some("folders/200000001".into()),
+                state: Some("Active".into()),
+                fetched_at: now,
+            },
+            ProjectRow {
+                project_id: "acme-analytics".into(),
+                display_name: Some("Acme Analytics".into()),
+                parent: Some("folders/200000001".into()),
                 state: Some("Active".into()),
                 fetched_at: now,
             },
@@ -153,7 +169,116 @@ impl DemoBackend {
             8 * 3600,
         );
 
+        seed(
+            Scope::Project,
+            "acme-prod-platform",
+            "k8s-admin",
+            true,
+            &["group:sre-leads@acme.example.com"],
+            &["roles/container.admin"],
+            2 * 3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-prod-platform",
+            "secrets-read",
+            true,
+            &["group:security@acme.example.com"],
+            &["roles/secretmanager.secretAccessor"],
+            3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-prod-platform",
+            "storage-admin",
+            true,
+            &[],
+            &["roles/storage.admin"],
+            4 * 3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-prod-platform",
+            "network-viewer",
+            false,
+            &[],
+            &["roles/compute.networkViewer"],
+            8 * 3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-staging",
+            "k8s-admin",
+            false,
+            &[],
+            &["roles/container.admin"],
+            8 * 3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-staging",
+            "secrets-admin",
+            false,
+            &[],
+            &["roles/secretmanager.admin"],
+            4 * 3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-data-warehouse",
+            "bigquery-admin",
+            true,
+            &["group:data-stewards@acme.example.com"],
+            &["roles/bigquery.admin"],
+            2 * 3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-data-warehouse",
+            "storage-read",
+            false,
+            &[],
+            &["roles/storage.objectViewer"],
+            8 * 3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-analytics",
+            "dataflow-developer",
+            false,
+            &[],
+            &["roles/dataflow.developer", "roles/storage.objectAdmin"],
+            8 * 3600,
+        );
+        seed(
+            Scope::Project,
+            "acme-analytics",
+            "pubsub-editor",
+            false,
+            &[],
+            &["roles/pubsub.editor"],
+            8 * 3600,
+        );
+
         // Folder-scope.
+        seed(
+            Scope::Folder,
+            "200000001",
+            "eng-viewer",
+            false,
+            &[],
+            &["roles/viewer"],
+            8 * 3600,
+        );
+        seed(
+            Scope::Folder,
+            "200000002",
+            "platform-network-admin",
+            true,
+            &["group:platform-leads@acme.example.com"],
+            &["roles/compute.networkAdmin"],
+            2 * 3600,
+        );
         seed(
             Scope::Folder,
             "200000001",
@@ -174,6 +299,18 @@ impl DemoBackend {
         );
 
         // Org-scope.
+        seed(
+            Scope::Organization,
+            "300000001",
+            "org-policy-admin",
+            true,
+            &[
+                "group:security@acme.example.com",
+                "user:cto@acme.example.com",
+            ],
+            &["roles/orgpolicy.policyAdmin"],
+            3600,
+        );
         seed(
             Scope::Organization,
             "300000001",
@@ -301,7 +438,7 @@ impl Backend for DemoBackend {
             return Ok(GrantState::Ended);
         };
         grant.poll_count += 1;
-        grant.state = if grant.auto || grant.poll_count >= 2 {
+        grant.state = if grant.auto || grant.poll_count >= MANUAL_APPROVAL_POLLS {
             GrantState::Active
         } else {
             GrantState::ApprovalAwaited

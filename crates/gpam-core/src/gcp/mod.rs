@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// Which level of the GCP resource hierarchy a PAM entitlement is attached to.
 /// PAM accepts the same parent shape for all three: `{plural}/{id}/locations/global`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     Project,

@@ -27,6 +27,11 @@ pub async fn list_visible(client: &Projects) -> Result<Vec<ProjectRow>> {
             } else {
                 Some(p.display_name)
             },
+            parent: if p.parent.is_empty() {
+                None
+            } else {
+                Some(p.parent)
+            },
             state: Some("ACTIVE".to_string()),
             fetched_at,
         });
