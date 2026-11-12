@@ -13,7 +13,8 @@ use crate::gcp::entitlements::parent;
 use crate::gcp::grants::{GrantDetails, GrantState, RoleBindingView};
 
 /// Seeded data + in-memory grant state machine. Lets the binary be tried
-/// without GCP credentials -- `--demo` swaps this in for [`GcpBackend`].
+/// without GCP credentials -- `--demo` swaps this in for
+/// [`GcpBackend`](super::gcp::GcpBackend).
 pub struct DemoBackend {
     projects: Vec<ProjectRow>,
     folders: Vec<FolderRow>,

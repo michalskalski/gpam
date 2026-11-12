@@ -1,26 +1,14 @@
-mod auth;
-mod backend;
-mod cache;
-mod fuzzy;
-mod gcp;
-mod ipc;
-mod logs;
-mod poller;
-mod refresh;
 mod tui;
 
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 
-use crate::backend::{Backend, demo::DemoBackend, gcp::GcpBackend};
-use crate::poller::DEFAULT_POLL_INTERVAL;
-use crate::refresh::RefreshOptions;
-
-const DEMO_POLL_INTERVAL: Duration = Duration::from_millis(800);
+use gpam_core::poller::{DEFAULT_POLL_INTERVAL, DEMO_POLL_INTERVAL};
+use gpam_core::refresh::RefreshOptions;
+use gpam_core::{backend, cache, gcp, ipc, logs};
 
 /// Terminal UI for Google Cloud Privileged Access Manager.
 ///
@@ -96,19 +84,8 @@ async fn run_approve(args: Args, name: String) -> Result<()> {
         );
     }
     let _log_state = logs::init()?;
-    let backend = resolve_backend(&args).await?.1;
+    let backend = backend::resolve(args.demo).await?.1;
     tui::run_approve(backend, name).await
-}
-
-async fn resolve_backend(args: &Args) -> Result<(String, Arc<dyn Backend>)> {
-    if args.demo {
-        let backend: Arc<dyn Backend> = Arc::new(DemoBackend::new());
-        Ok(("demo".into(), backend))
-    } else {
-        let session = auth::resolve().await?;
-        let backend: Arc<dyn Backend> = Arc::new(GcpBackend::new(session.credentials).await?);
-        Ok((session.account, backend))
-    }
 }
 
 async fn run_send(name: String, source: Option<String>) -> Result<()> {
@@ -126,7 +103,7 @@ async fn run_send(name: String, source: Option<String>) -> Result<()> {
 
 async fn run_tui(args: Args) -> Result<()> {
     let log_state = logs::init()?;
-    let (account, backend) = resolve_backend(&args).await?;
+    let (account, backend) = backend::resolve(args.demo).await?;
     let poll_interval = if args.demo {
         DEMO_POLL_INTERVAL
     } else {

@@ -1,8 +1,8 @@
-pub mod entitlements;
-pub mod folders;
+pub(crate) mod entitlements;
+pub(crate) mod folders;
 pub mod grants;
-pub mod organizations;
-pub mod projects;
+pub(crate) mod organizations;
+pub(crate) mod projects;
 
 use std::fmt;
 use std::str::FromStr;
@@ -67,7 +67,7 @@ impl FromStr for Scope {
     }
 }
 
-pub async fn pam_client(creds: Credentials) -> Result<PrivilegedAccessManager> {
+pub(crate) async fn pam_client(creds: Credentials) -> Result<PrivilegedAccessManager> {
     PrivilegedAccessManager::builder()
         .with_credentials(creds)
         .build()
@@ -75,7 +75,7 @@ pub async fn pam_client(creds: Credentials) -> Result<PrivilegedAccessManager> {
         .context("building PAM client")
 }
 
-pub async fn projects_client(creds: Credentials) -> Result<Projects> {
+pub(crate) async fn projects_client(creds: Credentials) -> Result<Projects> {
     Projects::builder()
         .with_credentials(creds)
         .build()
@@ -83,7 +83,7 @@ pub async fn projects_client(creds: Credentials) -> Result<Projects> {
         .context("building Projects client")
 }
 
-pub async fn folders_client(creds: Credentials) -> Result<Folders> {
+pub(crate) async fn folders_client(creds: Credentials) -> Result<Folders> {
     Folders::builder()
         .with_credentials(creds)
         .build()
@@ -91,7 +91,7 @@ pub async fn folders_client(creds: Credentials) -> Result<Folders> {
         .context("building Folders client")
 }
 
-pub async fn organizations_client(creds: Credentials) -> Result<Organizations> {
+pub(crate) async fn organizations_client(creds: Credentials) -> Result<Organizations> {
     Organizations::builder()
         .with_credentials(creds)
         .build()

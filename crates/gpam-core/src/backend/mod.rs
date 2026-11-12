@@ -6,11 +6,26 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 
+use crate::auth;
 use crate::cache::{EntitlementRow, FolderRow, OrganizationRow, ProjectRow};
 use crate::gcp::Scope;
 use crate::gcp::grants::{GrantDetails, GrantState};
 
 pub type DynBackend = Arc<dyn Backend>;
+
+/// Pick the data source: seeded fixtures when `demo` is set, otherwise GCP
+/// with Application Default Credentials. Returns the account name, which
+/// keys the local cache, alongside the backend.
+pub async fn resolve(demo: bool) -> Result<(String, DynBackend)> {
+    if demo {
+        let backend: DynBackend = Arc::new(demo::DemoBackend::new());
+        Ok(("demo".into(), backend))
+    } else {
+        let session = auth::resolve().await?;
+        let backend: DynBackend = Arc::new(gcp::GcpBackend::new(session.credentials).await?);
+        Ok((session.account, backend))
+    }
+}
 
 /// A scope to search, paired with the human-readable name discovered alongside
 /// it. The display name flows through to streamed entitlement rows so the UI

@@ -5,6 +5,17 @@ pub struct TextInput {
     cursor: usize, // byte offset
 }
 
+/// Line-editing operations shared by every text field in the app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditAction {
+    Insert(char),
+    Backspace,
+    Left,
+    Right,
+    Home,
+    End,
+}
+
 impl TextInput {
     pub fn new() -> Self {
         Self::default()
@@ -20,7 +31,7 @@ impl TextInput {
         &self.buf
     }
 
-    #[cfg(test)]
+    /// Cursor position as a byte offset into [`TextInput::as_str`].
     pub fn cursor(&self) -> usize {
         self.cursor
     }
@@ -32,6 +43,17 @@ impl TextInput {
     pub fn clear(&mut self) {
         self.buf.clear();
         self.cursor = 0;
+    }
+
+    pub fn apply(&mut self, edit: EditAction) {
+        match edit {
+            EditAction::Insert(c) => self.insert(c),
+            EditAction::Backspace => self.backspace(),
+            EditAction::Left => self.move_left(),
+            EditAction::Right => self.move_right(),
+            EditAction::Home => self.move_home(),
+            EditAction::End => self.move_end(),
+        }
     }
 
     pub fn insert(&mut self, c: char) {
@@ -109,22 +131,6 @@ fn next_char_boundary(s: &str, i: usize) -> usize {
     j.min(s.len())
 }
 
-/// Human-readable elapsed seconds.
-pub fn format_age(secs: i64) -> String {
-    if secs < 0 {
-        return "now".to_string();
-    }
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else if secs < 86400 {
-        format!("{}h", secs / 3600)
-    } else {
-        format!("{}d", secs / 86400)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,13 +177,5 @@ mod tests {
         }
         t.delete_word_back();
         assert_eq!(t.as_str(), "bar");
-    }
-
-    #[test]
-    fn format_age_units() {
-        assert_eq!(format_age(30), "30s");
-        assert_eq!(format_age(90), "1m");
-        assert_eq!(format_age(3700), "1h");
-        assert_eq!(format_age(90000), "1d");
     }
 }

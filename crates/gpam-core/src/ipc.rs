@@ -56,7 +56,7 @@ pub async fn send(path: &Path, event: &ApprovalEvent) -> Result<()> {
 /// Removes the socket file when dropped. Pair it with `bind_or_skip` so the
 /// listener and its cleanup live together. A panic anywhere above still runs
 /// Drop on the way out, so we don't leave stale sockets behind.
-pub struct SocketCleanup {
+pub(crate) struct SocketCleanup {
     path: PathBuf,
 }
 
@@ -72,7 +72,7 @@ impl Drop for SocketCleanup {
 /// guard that unlinks the path on drop). Returns `Ok(None)` when another
 /// gpam is already listening or when we can't bind for any other reason.
 /// In both cases a warning is logged and the TUI keeps running without IPC.
-pub fn bind_or_skip(path: &Path) -> Result<Option<(UnixListener, SocketCleanup)>> {
+pub(crate) fn bind_or_skip(path: &Path) -> Result<Option<(UnixListener, SocketCleanup)>> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating socket dir {}", parent.display()))?;
@@ -127,7 +127,7 @@ fn apply_owner_only_perms(path: &Path) {
 /// connection, and forward valid events through `tx`. Malformed lines and
 /// connection errors are logged and dropped.
 /// The loop never exits except when the listener itself becomes unusable.
-pub async fn listen(listener: UnixListener, tx: mpsc::Sender<ApprovalEvent>) {
+pub(crate) async fn listen(listener: UnixListener, tx: mpsc::Sender<ApprovalEvent>) {
     loop {
         let (stream, _) = match listener.accept().await {
             Ok(s) => s,
@@ -170,7 +170,7 @@ async fn handle_conn(stream: UnixStream, tx: mpsc::Sender<ApprovalEvent>) {
 }
 
 /// Parse one JSONL event and validate the resource name shape.
-pub fn parse_event(line: &str) -> Result<ApprovalEvent> {
+pub(crate) fn parse_event(line: &str) -> Result<ApprovalEvent> {
     let event: ApprovalEvent = serde_json::from_str(line).with_context(|| "decoding event")?;
     if !is_valid_grant_name(&event.name) {
         return Err(anyhow!(

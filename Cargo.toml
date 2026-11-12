@@ -1,17 +1,17 @@
-[package]
-name = "gpam"
+[workspace]
+resolver = "3"
+members = ["crates/gpam-core", "crates/gpam"]
+
+[workspace.package]
 version = "0.1.1"
 edition = "2024"
-description = "Terminal UI for Google Cloud Privileged Access Manager"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/michalskalski/gpam"
 homepage = "https://github.com/michalskalski/gpam"
-readme = "README.md"
-keywords = ["gcp", "pam", "tui", "iam", "privileged-access"]
-categories = ["command-line-utilities"]
-exclude = ["demo/*", "examples/*", "target/*", ".github/*"]
 
-[dependencies]
+[workspace.dependencies]
+gpam-core = { path = "crates/gpam-core", version = "0.1.1" }
+
 google-cloud-privilegedaccessmanager-v1 = "1"
 google-cloud-resourcemanager-v3 = "1"
 google-cloud-auth = "1"
@@ -37,5 +37,4 @@ directories = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-[dev-dependencies]
 tempfile = "3"

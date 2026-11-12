@@ -13,8 +13,8 @@ use crate::gcp::Scope;
 /// Cache freshness policy. The hard threshold blocks the UI on a refresh
 /// because the data would be too old to trust; the soft threshold lets the UI
 /// open instantly but kicks off a background re-scan.
-pub const SOFT_TTL_SECS: i64 = 30 * 60;
-pub const HARD_TTL_SECS: i64 = 24 * 60 * 60;
+pub(crate) const SOFT_TTL_SECS: i64 = 30 * 60;
+pub(crate) const HARD_TTL_SECS: i64 = 24 * 60 * 60;
 
 /// Max number of in-flight per-scope entitlement searches.
 const FANOUT: usize = 20;
@@ -52,13 +52,13 @@ impl RefreshOptions {
 }
 
 #[derive(Debug, Clone)]
-pub enum RefreshEvent {
+pub(crate) enum RefreshEvent {
     Started,
     EntitlementUpserted(EntitlementRow),
     Finished { total: usize, error: Option<String> },
 }
 
-pub enum Decision {
+pub(crate) enum Decision {
     /// Cached data is fresh enough; no refresh needed.
     Fresh,
     /// Show cached data, refresh in the background.
@@ -67,7 +67,7 @@ pub enum Decision {
     Hard,
 }
 
-pub fn decide(cache: &Cache) -> Decision {
+pub(crate) fn decide(cache: &Cache) -> Decision {
     match cache
         .meta_timestamp(meta_keys::ENTITLEMENTS_SCANNED_AT)
         .ok()
@@ -89,7 +89,7 @@ pub fn decide(cache: &Cache) -> Decision {
 
 /// Run a full re-scan: list visible scopes, fan out entitlement search across
 /// them, persist into the cache, and emit one event per upserted row.
-pub fn spawn(
+pub(crate) fn spawn(
     cache: Arc<Mutex<Cache>>,
     backend: DynBackend,
     options: RefreshOptions,

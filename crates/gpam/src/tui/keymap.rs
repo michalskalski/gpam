@@ -1,44 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-/// What part of the UI consumes the next keystroke.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Focus {
-    List,
-    Search,
-}
-
-#[derive(Debug, Clone)]
-pub enum Action {
-    Quit,
-    MoveUp(usize),
-    MoveDown(usize),
-    JumpTop,
-    JumpBottom,
-    ToggleSelect,
-    Submit,
-    Refresh,
-    FocusSearch,
-    FocusList,
-    ClearSelection,
-    SearchInsert(char),
-    SearchBackspace,
-    SearchCursor(SearchMove),
-    SearchDeleteWordBack,
-    Help,
-    ShowLogs,
-    ToggleRaw,
-    CycleScopeFilter,
-    ToggleMarkedView,
-    OpenApprovalQueue,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum SearchMove {
-    Left,
-    Right,
-    Home,
-    End,
-}
+use gpam_core::app::action::{Action, Focus, SearchMove};
+use gpam_core::app::text_input::EditAction;
 
 /// Pure mapping from (focus, key) to an action. Returning `None` means the
 /// key is ignored in this focus.
@@ -89,7 +51,7 @@ fn search_action(key: KeyEvent, ctrl: bool) -> Option<Action> {
         Enter => Action::Submit,
         Char('c') if ctrl => Action::Quit,
 
-        // Movement keys are caught here but the BrowseScreen `apply()` returns
+        // Movement keys are caught here but `BrowseState::apply()` returns
         // focus to the list before performing them. That makes Space-select
         // immediately reachable after a peek into the filtered list.
         Up => Action::MoveUp(1),
@@ -108,6 +70,20 @@ fn search_action(key: KeyEvent, ctrl: bool) -> Option<Action> {
         Home => Action::SearchCursor(SearchMove::Home),
         End => Action::SearchCursor(SearchMove::End),
         Char(c) if !ctrl => Action::SearchInsert(c),
+        _ => return None,
+    })
+}
+
+/// Line-editing keys shared by the request and approve text fields.
+pub fn edit_action(key: KeyEvent) -> Option<EditAction> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    Some(match key.code {
+        KeyCode::Backspace => EditAction::Backspace,
+        KeyCode::Left => EditAction::Left,
+        KeyCode::Right => EditAction::Right,
+        KeyCode::Home => EditAction::Home,
+        KeyCode::End => EditAction::End,
+        KeyCode::Char(c) if !ctrl => EditAction::Insert(c),
         _ => return None,
     })
 }

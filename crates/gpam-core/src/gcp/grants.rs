@@ -59,7 +59,7 @@ impl GrantState {
     /// Map an SDK state variant to our local enum. Any variant we do not
     /// recognize lands in [`GrantState::Unknown`], carrying whatever name the
     /// SDK exposes for it.
-    pub fn from_sdk(state: &grant::State) -> Self {
+    pub(crate) fn from_sdk(state: &grant::State) -> Self {
         match state {
             grant::State::ApprovalAwaited => Self::ApprovalAwaited,
             grant::State::Scheduled => Self::Scheduled,
@@ -139,7 +139,7 @@ impl FromSql for GrantState {
 }
 
 /// Submit a grant request. Returns the created grant's resource name on success.
-pub async fn create(
+pub(crate) async fn create(
     client: &PrivilegedAccessManager,
     entitlement_name: &str,
     duration_secs: i64,
@@ -164,7 +164,7 @@ pub async fn create(
 }
 
 /// Fetch the current state of a grant.
-pub async fn get(client: &PrivilegedAccessManager, grant_name: &str) -> Result<Grant> {
+pub(crate) async fn get(client: &PrivilegedAccessManager, grant_name: &str) -> Result<Grant> {
     client
         .get_grant()
         .set_name(grant_name)
@@ -175,7 +175,7 @@ pub async fn get(client: &PrivilegedAccessManager, grant_name: &str) -> Result<G
 
 /// Approve a grant in `APPROVAL_AWAITED` state. `reason` is sent only if
 /// non-empty; some workflows require it, most accept it as optional metadata.
-pub async fn approve(
+pub(crate) async fn approve(
     client: &PrivilegedAccessManager,
     grant_name: &str,
     reason: Option<&str>,
@@ -189,7 +189,7 @@ pub async fn approve(
 }
 
 /// Deny a grant in `APPROVAL_AWAITED` state.
-pub async fn deny(
+pub(crate) async fn deny(
     client: &PrivilegedAccessManager,
     grant_name: &str,
     reason: Option<&str>,
@@ -226,7 +226,7 @@ pub struct RoleBindingView {
 }
 
 /// Fetch a grant and project it into [`GrantDetails`] suitable for rendering.
-pub async fn get_details(
+pub(crate) async fn get_details(
     client: &PrivilegedAccessManager,
     grant_name: &str,
 ) -> Result<GrantDetails> {

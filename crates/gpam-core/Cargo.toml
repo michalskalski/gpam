@@ -1,0 +1,36 @@
+[package]
+name = "gpam-core"
+version.workspace = true
+edition.workspace = true
+description = "Frontend-agnostic core of gpam: Google Cloud Privileged Access Manager backend, cache, and UI state"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+keywords = ["gcp", "pam", "iam", "privileged-access"]
+categories = ["api-bindings"]
+
+[dependencies]
+google-cloud-privilegedaccessmanager-v1.workspace = true
+google-cloud-resourcemanager-v3.workspace = true
+google-cloud-auth.workspace = true
+google-cloud-gax.workspace = true
+google-cloud-wkt.workspace = true
+
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+rusqlite.workspace = true
+nucleo-matcher.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+directories.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

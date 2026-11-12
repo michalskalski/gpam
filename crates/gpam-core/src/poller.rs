@@ -12,14 +12,17 @@ use crate::gcp::grants::GrantState;
 /// Default cadence for real GCP. `--demo` overrides this with a smaller value.
 pub const DEFAULT_POLL_INTERVAL: StdDuration = StdDuration::from_secs(3);
 
+/// Faster cadence for the demo backend, whose fake grants settle quickly.
+pub const DEMO_POLL_INTERVAL: StdDuration = StdDuration::from_millis(800);
+
 /// Wake-up sent by the poller after persisting one observation to the cache.
 /// The receiver re-reads the grant rows from the DB on each update, so the
 /// signal itself carries no payload.
 #[derive(Debug, Clone)]
-pub struct GrantUpdate;
+pub(crate) struct GrantUpdate;
 
 #[derive(Debug, Clone, Copy)]
-pub enum PollMode {
+pub(crate) enum PollMode {
     /// Poll until the grant transitions to Active or a terminal state. Used
     /// for newly-submitted grants and for pending grants found in the cache
     /// on launch.
@@ -34,10 +37,10 @@ pub enum PollMode {
 /// to clone.
 #[derive(Clone)]
 pub struct Poller {
-    pub backend: DynBackend,
-    pub cache: Arc<Mutex<Cache>>,
-    pub tx: mpsc::Sender<GrantUpdate>,
-    pub interval: StdDuration,
+    pub(crate) backend: DynBackend,
+    pub(crate) cache: Arc<Mutex<Cache>>,
+    pub(crate) tx: mpsc::Sender<GrantUpdate>,
+    pub(crate) interval: StdDuration,
 }
 
 impl Poller {
@@ -45,7 +48,7 @@ impl Poller {
     /// the cache and forwards a [`GrantUpdate`] on `tx`. Returns when the
     /// grant reaches a terminal/active state (Track) or after one poll
     /// (ConfirmOnce).
-    pub async fn poll_grant(
+    pub(crate) async fn poll_grant(
         self,
         grant_name: String,
         requested_duration_secs: i64,
